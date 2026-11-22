@@ -25,7 +25,9 @@ export async function loadSegmenter() {
 export async function segment(canvas, taps) {
   const s = await loadSegmenter();
   if (imageSet !== canvas) { s.setImage(canvas); imageSet = canvas; }
-  const strokes = taps.map((t) => ({ brushMode: t.add ? lib.BrushMode.POSITIVE : lib.BrushMode.NEGATIVE, point: [{ x: t.x, y: t.y }], isCompleted: true }));
+  // BrushMode 는 번들에서 내보내지 않음 → 숫자로 (1=더하기, 2=빼기)
+  const BM = lib.BrushMode || { POSITIVE: 1, NEGATIVE: 2 };
+  const strokes = taps.map((t) => ({ brushMode: t.add ? BM.POSITIVE : BM.NEGATIVE, point: [{ x: t.x, y: t.y }], isCompleted: true }));
   const mask = s.segment(strokes);
   try {
     const W = canvas.width, H = canvas.height;
@@ -47,3 +49,10 @@ export async function segment(canvas, taps) {
 }
 
 export function resetImage() { imageSet = null; }
+
+/** 다른 사진 한 장을 한 번 잘라내기 (가구 사진 등). 가운데를 톡 한 것처럼 */
+export async function segmentOnce(canvas, points = [{ x: 0.5, y: 0.55 }]) {
+  const prev = imageSet; imageSet = null;
+  try { return await segment(canvas, points.map((p) => ({ ...p, add: true }))); }
+  finally { imageSet = null; void prev; }
+}

@@ -2,6 +2,7 @@
 import { h, toast, progress, slider, pageHeader, pickButtons, errorText } from '../core/ui.js';
 import { loadBitmap, toCanvas, makeCanvas, ctx2d, canvasToBlob, shareOrDownload, baseName, keepExif } from '../core/img.js';
 import { segment, resetImage } from '../core/seg.js';
+import { refineSelection, outlineCanvas } from '../core/mask.js';
 import { dilate, bboxOf, fastFill, lamaFill, lamaReady } from '../core/inpaint.js';
 import { history, thumbOf } from '../core/store.js';
 
@@ -55,7 +56,7 @@ function buildWs() {
     h('p', { class: 'muted small' }, '덜 잡혔으면 ➕로 더 톡, 너무 많이 잡혔으면 ➖로 톡. 테두리는 붓으로 다듬어요.'),
     h('div', { class: 'row' },
       h('button', { class: 'btn ghost sm', onclick: undo }, '↶ 되돌리기'),
-      h('button', { class: 'btn ghost sm', onclick: () => { S.taps = []; S.strokes = []; S.conf = null; rebuildMask(); draw(); } }, '선택 지우기')),
+      h('button', { class: 'btn ghost sm', onclick: () => { S.taps = []; S.strokes = []; S.conf = null; applySeg(); rebuildMask(); draw(); } }, '선택 지우기')),
     h('div', { class: 'row', style: { marginTop: '10px' } },
       h('button', { class: 'btn grow', onclick: extract }, '✂️ 추출 (투명 PNG)'),
       h('button', { class: 'btn green grow', onclick: () => startMove() }, '✋ 옮기기'),
@@ -102,9 +103,14 @@ function draw() {
   }
   g.drawImage(S.img, 0, 0);
   if (S.mask) {
+    // 삼성 갤러리처럼: 바깥은 살짝 어둡게, 물체 테두리는 흰 빛
     const ov = g.getImageData(0, 0, S.W, S.H), d = ov.data, m = S.mask;
-    for (let i = 0; i < m.length; i++) if (m[i]) { const k = i * 4; d[k] = d[k] * 0.45 + 217 * 0.55; d[k + 1] = d[k + 1] * 0.45 + 101 * 0.55; d[k + 2] = d[k + 2] * 0.45 + 59 * 0.55; }
+    for (let i = 0; i < m.length; i++) if (!m[i]) { const k = i * 4; d[k] *= 0.55; d[k + 1] *= 0.55; d[k + 2] *= 0.55; }
     g.putImageData(ov, 0, 0);
+    if (S.outline) {
+      g.save(); g.shadowColor = 'rgba(255,255,255,0.95)'; g.shadowBlur = Math.max(8, S.W / 150);
+      g.drawImage(S.outline, 0, 0); g.drawImage(S.outline, 0, 0); g.restore();
+    }
   }
   const R = Math.max(6, S.W / 90);
   for (const t of S.taps) {
@@ -116,8 +122,7 @@ function draw() {
 // ── 선택 ─────────────────────────────────────────────
 function rebuildMask() {
   const n = S.W * S.H;
-  const m = new Uint8Array(n);
-  if (S.conf) for (let i = 0; i < n; i++) m[i] = S.conf[i] > 0.5 ? 1 : 0;
+  const m = S.sel ? new Uint8Array(S.sel) : new Uint8Array(n);
   S.brushAdd = new Uint8Array(n);
   for (const st of S.strokes) {
     const r = st.r, r2 = r * r;
@@ -131,6 +136,13 @@ function rebuildMask() {
     }
   }
   S.mask = m.some((v) => v) ? m : null;
+  S.outline = S.mask ? outlineCanvas(S.mask, S.W, S.H, Math.max(2, Math.round(S.W / 500))) : null;
+}
+
+function applySeg() {
+  if (!S.conf) { S.sel = null; S.alpha = null; return; }
+  const r = refineSelection(S.conf, S.img, S.taps);
+  S.sel = r.mask; S.alpha = r.alpha;
 }
 
 let segBusy = false;
@@ -143,7 +155,9 @@ async function tapAt(nx, ny, add) {
   const slow = setTimeout(() => (p = progress('물체 인식 모델 준비 중 (처음 한 번)')), 400);
   try {
     S.conf = await segment(S.img, S.taps);
+    applySeg();
     rebuildMask();
+    if (S.taps.length === 1 && S.mask) toast('물체 테두리를 자동으로 잡았어요');
   } catch (e) {
     S.taps.pop(); console.error(e);
     toast(errorText(e), 5000);
@@ -152,11 +166,11 @@ async function tapAt(nx, ny, add) {
 
 function undo() {
   if (S.strokes.length && (!S.taps.length || S.strokes.at(-1).t > (S.taps.at(-1).t || 0))) S.strokes.pop();
-  else if (S.taps.length) { S.taps.pop(); if (!S.taps.length) S.conf = null; else return tapReplay(); }
+  else if (S.taps.length) { S.taps.pop(); if (!S.taps.length) { S.conf = null; applySeg(); } else return tapReplay(); }
   rebuildMask(); draw();
 }
 async function tapReplay() {
-  try { S.conf = await segment(S.img, S.taps); } catch {}
+  try { S.conf = await segment(S.img, S.taps); applySeg(); } catch {}
   rebuildMask(); draw();
 }
 
@@ -223,7 +237,7 @@ function cutLayer() {
   for (let y = 0; y < bb.h; y++) for (let x = 0; x < bb.w; x++) {
     const i = (bb.y + y) * S.W + bb.x + x;
     let a = 0;
-    if (S.mask[i]) a = S.brushAdd?.[i] || !S.conf ? 1 : Math.min(1, Math.max(0.35, (S.conf[i] - 0.3) / 0.4));
+    if (S.mask[i]) a = S.brushAdd?.[i] || !S.alpha ? 1 : Math.min(1, Math.max(0.5, S.alpha[i] * 1.4));
     d[(y * bb.w + x) * 4 + 3] = a * 255;
   }
   g.putImageData(id, 0, 0);
@@ -262,7 +276,7 @@ async function removeObj() {
   if (hq == null) return;
   try {
     const bg = await filledBackground(hq);
-    S.img = bg; S.taps = []; S.strokes = []; S.conf = null; S.mask = null; resetImage();
+    S.img = bg; S.taps = []; S.strokes = []; S.conf = null; S.sel = null; S.alpha = null; S.mask = null; S.outline = null; resetImage();
     els.saveCur.classList.remove('hidden');
     draw();
     toast('지웠어요. [💾 지금 사진 저장]으로 저장하거나 다른 물체를 더 고르세요', 4000);

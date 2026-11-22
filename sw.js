@@ -1,7 +1,7 @@
 // 오프라인 동작용 서비스 워커
 // - 앱 화면 파일: 미리 저장(버전이 바뀌면 새로 받음)
 // - AI 엔진(jsDelivr)·물체 인식 모델(Google): 처음 쓸 때 저장해 두고 다음부터 폰에서 바로
-const VERSION = 'v1.1.0';
+const VERSION = 'v1.2.0';
 const APP = 'mc-app-' + VERSION;
 const RUNTIME = 'mc-runtime-v1';
 const SHELL = [
@@ -9,7 +9,7 @@ const SHELL = [
   './js/app.js', './js/core/ui.js', './js/core/img.js', './js/core/adjust.js', './js/core/lut.js', './js/core/store.js',
   './js/core/ocr.js', './js/core/photos.js', './js/core/prepare.js', './js/core/seg.js', './js/core/inpaint.js', './js/core/clip.js', './js/data/interior.js',
   './js/pages/edit.js', './js/pages/object.js', './js/pages/ocr.js', './js/pages/interior.js', './js/pages/batch.js',
-  './js/pages/convert.js', './js/pages/library.js', './js/pages/help.js',
+  './js/pages/convert.js', './js/pages/library.js', './js/pages/help.js', './js/pages/compose.js', './js/core/mask.js',
   './vendor/jszip.min.js', './vendor/piexif.js', './vendor/pdf.min.mjs', './vendor/pdf.worker.min.mjs', './vendor/jspdf.umd.min.js', './vendor/heic2any.min.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/maskable-512.png',
 ];

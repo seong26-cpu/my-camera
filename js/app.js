@@ -1,7 +1,7 @@
 // 나의 카메라 — 화면 이동(라우터)과 처음 화면
 import { h, toast } from './core/ui.js';
 
-export const APP_VERSION = '1.1.0';
+export const APP_VERSION = '1.2.0';
 
 // 처음 화면 타일: 실제 사진(CC0·퍼블릭 도메인)을 Openverse에서 자동으로 찾아 배경으로 씀
 const PAGES = {
@@ -86,6 +86,10 @@ route();
 // 오프라인·설치(PWA)
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+  // 새 버전이 설치되면 자동으로 한 번 새로고침 (사용자 조작 없음)
+  let reloaded = false;
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloaded) { reloaded = true; location.reload(); } });
 }
 
 // 와이파이일 때 AI 모델을 뒤에서 자동 준비 (사용자 조작 없음)

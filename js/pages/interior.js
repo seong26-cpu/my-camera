@@ -36,7 +36,7 @@ export async function render(root) {
 
 async function setPhoto(f) {
   const b = await loadBitmap(f);
-  S.canvas = toCanvas(b, 640); b.close?.();
+  S.canvas = toCanvas(b, 640); S.full = toCanvas(b, 1600); S.composer = null; b.close?.();
   const img = S.canvas.cloneNode(); ctx2d(img).drawImage(S.canvas, 0, 0);
   img.style.cssText = 'width:100%;border-radius:12px;margin-top:10px';
   preview.replaceChildren(img);
@@ -107,7 +107,7 @@ async function analyze() {
     S.target = fromText || S.detected?.[0]?.key || 'natural';
   } catch (e) { toast(errorText(e), 5000); console.error(e); }
   finally { p.done(); }
-  if (S.palette) draw();
+  if (S.palette) { draw(); setTimeout(() => S.composer?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300); }
 }
 
 function draw() {
@@ -131,7 +131,14 @@ function draw() {
   const photos = h('div', { class: 'photos' });
   const query = [st.en.replace(' interior', ''), room.en, ...extras].join(' ');
 
+  // 내 방 사진 안에서 직접 배치 (가장 위)
+  const ctxInfo = { style: S.target, styleKo: st.ko, palette: st.colors, room: room.key };
+  if (!S.composer) {
+    S.composer = h('div');
+    import('./compose.js').then((m) => m.openComposer(S.composer, S.full, ctxInfo));
+  } else import('./compose.js').then((m) => m.updateContext(ctxInfo));
   out.replaceChildren(
+    S.composer,
     h('div', { class: 'card' },
       h('h2', { style: { marginTop: 0 } }, `지금 ${room.ko}`),
       h('p', {}, `밝기: ${bright} · 색감: ${tone}`),
@@ -145,12 +152,12 @@ function draw() {
       list('🧱 소재', st.materials), list('🛋 가구', st.furniture), list('💡 조명', st.light), list('🌿 소품', st.props),
       list(`📍 ${room.ko} 요령`, ROOM_TIPS[room.key] || []), list('🚫 피하면 좋은 것', st.avoid),
       budget ? list('💰 예산 쓰는 순서', budget) : null),
-    h('div', { class: 'card' },
-      h('h2', { style: { marginTop: 0 } }, '📷 실제 인테리어 사진'),
-      h('p', { class: 'muted small' }, `검색어: ${query}`),
+    h('details', { class: 'card' },
+      h('summary', {}, '📷 다른 집 참고 사진 (선택)'),
+      h('p', { class: 'muted small' }, `내 방이 아닌 비슷한 스타일의 실제 사진이에요 · 검색어: ${query}`),
       photos,
       h('p', { class: 'muted small', style: { marginTop: '8px' } }, '사진: Openverse의 CC0·퍼블릭 도메인 실사 사진 (누르면 원본 페이지)')));
-  loadPhotos(query, photos);
+  out.querySelector('details').addEventListener('toggle', function once(e) { if (e.target.open) { loadPhotos(query, photos); e.target.removeEventListener('toggle', once); } });
 }
 
 async function loadPhotos(query, box) {
