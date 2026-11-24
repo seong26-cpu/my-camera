@@ -50,6 +50,16 @@ object Store {
         return null
     }
 
+    /** 레시피 하나의 일부 값만 바꿔 저장 (버튼 지정 등) */
+    fun updateRecipe(ctx: Context, id: String, change: (JSONObject) -> Unit): Boolean = synchronized(lock) {
+        val arr = recipes(ctx)
+        for (i in 0 until arr.length()) {
+            val r = arr.optJSONObject(i) ?: continue
+            if (r.optString("id") == id) { change(r); write(ctx, RECIPES, arr.toString()); return true }
+        }
+        false
+    }
+
     fun today(): String = LocalDate.now().toString()
 
     fun addLog(ctx: Context, recipeId: String, name: String, code: String, message: String) {

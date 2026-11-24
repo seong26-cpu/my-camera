@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const ENG = path.join(__dirname, '../android/app/src/main/assets/engine');
 const runner = fs.readFileSync(path.join(ENG, 'runner.js'), 'utf8');
+const picker = fs.readFileSync(path.join(ENG, 'picker.js'), 'utf8');
 const D = JSON.parse(fs.readFileSync(path.join(ENG, 'defaults.json'), 'utf8'));
 const pageUrl = (f) => 'file://' + path.join(__dirname, 'pages', f);
 const cfg = (type, extra = {}) => Object.assign({ id: 't-' + type, type, keywords: D.keywords[type], navKeywords: D.navKeywords[type], patterns: D.patterns, findTimeoutMs: 4000 }, extra);
@@ -97,6 +98,41 @@ function check(name, cond, info) {
   console.log('10) 사이트 알림창 문구 판정 (안드로이드도 같은 규칙 사용)');
   const cls = await p.evaluate(() => [__EH.classify('이미 출석하셨습니다'), __EH.classify('이미 출석 완료'), __EH.classify('이벤트가 종료되었습니다'), __EH.classify('로그인이 필요합니다'), __EH.classify('안녕하세요')]);
   check('알림 판정', cls[0][0] === 'ALREADY_DONE' && cls[1][0] === 'ALREADY_DONE' && cls[2][0] === 'CLOSED' && cls[3][0] === 'LOGIN_REQUIRED' && cls[4] === null, cls);
+
+  console.log('11) 폼: 프로필 빈 칸만 입력 · 아이디/검색/나뉜 칸/동의 체크박스는 안 건드림');
+  const pf = { name: '홍길동', phone: '01012345678', email: 'me@example.com' };
+  await p.goto(pageUrl('form-profile.html')); await inject(p, cfg('form', { profile: pf }));
+  await wait(1500);
+  const v = await p.evaluate(() => ({
+    name: document.getElementById('nm').value, tel: document.querySelector('input[type=tel]').value,
+    mail: document.querySelector('input[type=email]').value, id: document.querySelector('[name=userid]').value,
+    search: document.querySelector('input[type=search]').value, four: document.querySelector('[maxlength="4"]').value,
+    agree: document.getElementById('agree').checked, sub: window.__submitted }));
+  check('이름·휴대폰·이메일 입력', v.name === '홍길동' && v.tel === '01012345678' && v.mail === 'me@example.com', v);
+  check('아이디·검색·4자리 칸 비어 있음', v.id === '' && v.search === '' && v.four === '', v);
+  check('동의 체크 안 함 · 자동 제출 0회', v.agree === false && v.sub === 0, v);
+  check('응모 버튼 강조(READY)', (await codes(p)).includes('status:READY'), await codes(p));
+
+  console.log('12) 버튼 톡 지정: 톡을 가로채 기억만 함 (사이트 동작 실행 안 됨)');
+  await p.goto(pageUrl('picker.html'));
+  await p.evaluate(([src]) => { window.__EH_PICK_MODE = 'target'; (0, eval)(src); }, [picker]);
+  await p.click('text=꾹 누르기'); await wait(300);
+  const pk = await p.evaluate(() => ({ picks: window.__EH_PICKS, sub: window.__submitted, url: location.href }));
+  check('지정 결과 보고', pk.picks && pk.picks[0] && pk.picks[0].text === '꾹 누르기' && !!pk.picks[0].selector, pk);
+  check('사이트 동작 실행 안 됨 · 이동 안 됨', pk.sub === 0 && pk.url.endsWith('picker.html'), pk);
+  await wait(900);
+  await p.click('text=다른 버튼');
+  check('지정 끝난 뒤 사이트 정상 동작', (await p.evaluate(() => window.__submitted)) === 1, null);
+
+  console.log('13) 지정한 버튼(기본 글자와 달라도)을 다음부터 강조');
+  const sel = pk.picks[0].selector;
+  await p.goto(pageUrl('picker.html')); await inject(p, cfg('attend', { targetSelector: sel, targetText: '꾹 누르기' }));
+  await wait(1200);
+  check('지정 버튼 강조', await p.$eval('.go-btn', (e) => e.style.outline.includes('4px')), sel);
+  check('자동 제출 0회', (await p.evaluate(() => window.__submitted)) === 0, null);
+  await p.goto(pageUrl('picker.html')); await inject(p, cfg('attend', { targetSelector: '#없는주소', targetText: '꾹 누르기' }));
+  await wait(1200);
+  check('주소가 바뀌어도 글자로 찾음', await p.$eval('.go-btn', (e) => e.style.outline.includes('4px')), null);
 
   await b.close();
   console.log(`\n결과: ${pass} 통과 / ${fail} 실패`);

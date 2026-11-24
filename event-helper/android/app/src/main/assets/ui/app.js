@@ -14,6 +14,7 @@ const A = window.Android || (() => {
     addLog: (j) => { const l = JSON.parse(g('logs', '[]')); l.push(JSON.parse(j)); return s('logs', JSON.stringify(l)); },
     getSettings: () => g('settings', '{}'), saveSettings: (j) => s('settings', j),
     today, appVersion: () => 'browser-preview', notifyAllowed: () => false,
+    getProfile: () => g('profile', '{}'), saveProfile: (j) => s('profile', j), clearProfile: () => s('profile', '{}'),
     openSite: (id) => { window.__opened = id; toast('(미리보기) 응모 화면 열기: ' + id); },
     openExternal: (u) => window.open(u, '_blank'), testNotify: () => toast('(미리보기) 알림 시험'),
   };
@@ -165,6 +166,9 @@ function renderEditor(el) {
     <input type="text" id="f-keywords" value="${esc(Array.isArray(r.keywords) ? r.keywords.join(', ') : (r.keywords || ''))}" placeholder="예: 출석체크하기, 응모하기">
     <label>이동할 메뉴 글자 <small>(이벤트 모음에서 찾아 들어갈 메뉴 · 비우면 기본값)</small></label>
     <input type="text" id="f-nav" value="${esc(Array.isArray(r.navKeywords) ? r.navKeywords.join(', ') : (r.navKeywords || ''))}" placeholder="예: 출석체크">
+    ${r.targetText || r.targetSelector || r.navText ? `<p class="help">🎯 직접 지정함: ${r.targetText ? `참여 버튼 "<b>${esc(r.targetText)}</b>"` : ''} ${r.navText ? `· 메뉴 "<b>${esc(r.navText)}</b>"` : ''}
+      <button class="ghost" id="clearPick" style="padding:4px 10px;font-size:13px">지정 지우기</button></p>`
+      : `<p class="help">🎯 버튼을 못 찾으면: 응모 화면 아래 <b>[🎯 버튼 지정]</b> → 사이트의 버튼을 톡 하면 기억해요 (약관 확인 사이트만).</p>`}
     <label>메모</label><input type="text" id="f-note" value="${esc(r.note || '')}">
     ${(r.flags || []).map((f) => `<p class="help">· ${esc(f)}</p>`).join('')}
     ${r.source ? `<p class="help">주소 출처: 웹 검색 (${esc(r.checkedAt || '')})</p>` : ''}
@@ -214,12 +218,22 @@ function renderLogs() {
 /* ---------- 설정 ---------- */
 function renderSettings() {
   const el = $('#tab-settings');
+  const profile = parse(A.getProfile ? A.getProfile() : '{}', {});
   el.innerHTML = `<label>아침 알림 시각</label>
     <input type="time" id="s-morning" value="${esc(settings.morningTime || '08:00')}">
     <p class="help">매일 이 시각에 "오늘 응모할 이벤트 N건" 알림이 옵니다. 폰 절전 때문에 몇 분 늦을 수 있어요.</p>
     <button class="primary wide" id="saveSettings">저장</button>
     <button class="ghost wide" id="testNotify">알림 시험</button>
     <p class="help">알림 권한: <b>${A.notifyAllowed() ? '켜짐' : '꺼짐 — 폰 설정 > 앱 > 응모 도우미 > 알림'}</b></p>
+    <h2>내 프로필 <small style="font-weight:400">(폼 입력형 응모 자동 채움)</small></h2>
+    <p class="help">폰의 안드로이드 키 저장소로 <b>암호화</b>해 이 폰에만 저장합니다. '폼 입력' 유형 + 약관 확인한 사이트의 <b>빈 칸에만</b> 넣고,
+    개인정보 동의 체크·제출은 직접 하셔야 해요. 쓰기 싫으면 비워 두세요.</p>
+    <label>이름</label><input type="text" id="p-name" value="${esc(profile.name || '')}" autocomplete="off">
+    <label>휴대폰 <small>(숫자만)</small></label><input type="text" inputmode="numeric" id="p-phone" value="${esc(profile.phone || '')}" autocomplete="off">
+    <label>이메일</label><input type="text" inputmode="email" id="p-email" value="${esc(profile.email || '')}" autocomplete="off">
+    <label>생년월일 <small>(예: 19800101)</small></label><input type="text" inputmode="numeric" id="p-birth" value="${esc(profile.birth || '')}" autocomplete="off">
+    <button class="primary wide" id="saveProfile">프로필 암호화 저장</button>
+    <button class="danger wide" id="clearProfile">프로필 지우기</button>
     <h2>안전 원칙</h2>
     <p class="help">· 최종 제출·캡차·약관 동의는 항상 직접 누릅니다.<br>
     · 캡차 자동 풀이, 여러 계정, 초 단위 연타 기능은 없습니다 (사이트 약관·계정 보호).<br>
@@ -268,6 +282,22 @@ document.addEventListener('click', (e) => {
       break;
     }
     case 'testNotify': A.testNotify(); break;
+    case 'saveProfile': {
+      const pv = (id) => $(id).value.trim();
+      const pf = { name: pv('#p-name'), phone: pv('#p-phone').replace(/\D/g, ''), email: pv('#p-email'), birth: pv('#p-birth').replace(/\D/g, '') };
+      if (pf.phone && !/^01\d{8,9}$/.test(pf.phone)) { toast('휴대폰 번호를 확인해 주세요 (예: 01012345678)'); break; }
+      if (pf.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(pf.email)) { toast('이메일 형식을 확인해 주세요'); break; }
+      if (pf.birth && !/^(19|20)\d{6}$/.test(pf.birth)) { toast('생년월일은 8자리 숫자로 (예: 19800101)'); break; }
+      toast(A.saveProfile(JSON.stringify(pf)) ? '암호화해서 저장했어요' : '저장 실패'); renderSettings(); break;
+    }
+    case 'clearProfile':
+      if (confirm('프로필을 지울까요?')) { A.clearProfile(); toast('지웠어요'); renderSettings(); }
+      break;
+    case 'clearPick': {
+      const r = recipes.find((x) => x.id === editingId);
+      if (r) { delete r.targetSelector; delete r.targetText; delete r.navText; saveRecipes(); toast('지정을 지웠어요'); renderManage(); }
+      break;
+    }
   }
 });
 

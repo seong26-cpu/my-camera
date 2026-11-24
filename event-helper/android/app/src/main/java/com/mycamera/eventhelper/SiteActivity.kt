@@ -2,6 +2,7 @@ package com.mycamera.eventhelper
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
@@ -95,6 +96,7 @@ class SiteActivity : Activity() {
         btn(row2, "⏭ 건너뜀") { record("USER_SKIPPED") }
         btn(row2, "⚠ 실패") { record(lastErrorCode.ifEmpty { "FAILED" }) }
         btn(row2, "↻ 새로고침") { web.reload() }
+        if (assist) btn(row2, "🎯 버튼 지정") { choosePick() }
 
         web = WebView(this)
         root.addView(title, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
@@ -227,6 +229,42 @@ class SiteActivity : Activity() {
         showStatus("📝 자동 판정: $label → 기록했어요. 다르면 아래 버튼으로 고쳐 주세요")
     }
 
+    /** 버튼 톡 지정: 다음 톡 한 번을 가로채 그 버튼을 기억 (누른 동작은 사이트로 안 감) */
+    private fun choosePick() {
+        AlertDialog.Builder(this)
+            .setTitle("무엇을 지정할까요?")
+            .setItems(arrayOf("참여 버튼 (출석·응모·쿠폰 받기)", "들어갈 메뉴 (이벤트 모음 → 출석 메뉴)", "지정 지우기")) { _, which ->
+                when (which) {
+                    0 -> startPick("target")
+                    1 -> startPick("nav")
+                    else -> {
+                        Store.updateRecipe(this, recipe.optString("id")) { r ->
+                            r.remove("targetSelector"); r.remove("targetText"); r.remove("navText")
+                        }
+                        recipe.remove("targetSelector"); recipe.remove("targetText"); recipe.remove("navText")
+                        showStatus("🧹 지정을 지웠어요. 기본 글자로 찾아요")
+                    }
+                }
+            }
+            .setNegativeButton("취소", null)
+            .show()
+    }
+
+    private fun startPick(mode: String) {
+        showStatus(if (mode == "nav") "🎯 들어갈 메뉴를 톡 하세요 (이번 톡은 사이트에 전달되지 않아요)" else "🎯 참여 버튼을 톡 하세요 (이번 톡은 사이트에 전달되지 않아요)")
+        web.evaluateJavascript(Engine.pickerScript(this, mode), null)
+    }
+
+    private fun savePick(mode: String, selector: String, text: String) {
+        if (text.isEmpty() && selector.isEmpty()) { showStatus("⚠ 지정할 수 없는 곳이에요. 버튼 글자 위를 톡 해 주세요"); return }
+        Store.updateRecipe(this, recipe.optString("id")) { r ->
+            if (mode == "nav") r.put("navText", text)
+            else { r.put("targetSelector", selector); r.put("targetText", text) }
+        }
+        if (mode == "nav") recipe.put("navText", text) else { recipe.put("targetSelector", selector); recipe.put("targetText", text) }
+        showStatus("✅ 지정했어요: \"${text.ifEmpty { "(글자 없음)" }}\" — 다음부터 이 " + (if (mode == "nav") "메뉴로 이동" else "버튼을 강조") + "해요")
+    }
+
     /** runner.js → 안드로이드 보고 통로. 기록·안내만 가능 (다른 데이터 접근 없음) */
     inner class EngineBridge {
         @JavascriptInterface
@@ -242,6 +280,7 @@ class SiteActivity : Activity() {
                         showStatus((if (code == "READY") "👆 " else "⚠ ") + msg)
                     }
                     "info" -> if (code != "ENGINE_START") showStatus("🤖 $msg")
+                    "picked" -> savePick(r.optString("mode"), r.optString("selector").take(300), r.optString("text").take(30))
                 }
             }
         }

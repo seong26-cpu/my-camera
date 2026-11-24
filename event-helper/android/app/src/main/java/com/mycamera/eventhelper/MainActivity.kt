@@ -76,6 +76,13 @@ class MainActivity : Activity() {
             Store.saveSettings(ctx, json); Scheduler.rescheduleAll(ctx); true
         } catch (e: Exception) { false }
 
+        /** 프로필: 화면에는 저장 여부와 값(본인 확인용)만 보여줌 */
+        @JavascriptInterface fun getProfile(): String = Profile.load(ctx).toString()
+        @JavascriptInterface fun saveProfile(json: String): Boolean = try {
+            Profile.save(ctx, JSONObject(json)); true
+        } catch (e: Exception) { false }
+        @JavascriptInterface fun clearProfile() = Profile.clear(ctx)
+
         @JavascriptInterface fun today(): String = Store.today()
         @JavascriptInterface fun appVersion(): String =
             packageManager.getPackageInfo(packageName, 0).versionName ?: ""

@@ -124,6 +124,37 @@
     return true;
   }
 
+  /* ---------- 폼: 내 프로필 자동 입력 (빈 칸만, 동의 체크박스는 절대 안 건드림) ---------- */
+  var PROFILE_RULES = [
+    ['name', function (el, h) { return /이름|성명|성 ?함|\bname\b/i.test(h) && !/아이디|username|\bid\b|user ?id|닉네임|nick|회사|상품|검색/i.test(h); }],
+    ['phone', function (el, h) { return el.type === 'tel' || /휴대폰|휴대전화|핸드폰|연락처|전화|phone|mobile|\bhp\b|\btel\b/i.test(h); }],
+    ['email', function (el, h) { return el.type === 'email' || /이메일|e-?mail/i.test(h); }],
+    ['birth', function (el, h) { return /생년월일|생일|birth/i.test(h); }],
+  ];
+  function fillProfile() {
+    var pf = cfg.profile;
+    if (!pf || cfg.type !== 'form') return 0;
+    var els = document.querySelectorAll('input:not([type]), input[type=text], input[type=tel], input[type=email], input[type=number]');
+    var done = {}, n = 0;
+    for (var i = 0; i < els.length; i++) {
+      var el = els[i];
+      if (!visible(el) || el.readOnly || el.disabled || el.value) continue;
+      var h = [el.name, el.id, el.placeholder, el.getAttribute('aria-label'), el.getAttribute('autocomplete'), el.title].join(' ');
+      var lab = el.id && document.querySelector('label[for="' + el.id + '"]');
+      if (lab) h += ' ' + lab.innerText;
+      if (el.maxLength > 0 && el.maxLength <= 4) continue; // 010-xxxx-xxxx 처럼 나뉜 칸은 건너뜀 (직접 입력)
+      for (var k = 0; k < PROFILE_RULES.length; k++) {
+        var key = PROFILE_RULES[k][0];
+        if (done[key] || !pf[key] || !PROFILE_RULES[k][1](el, h)) continue;
+        setValue(el, pf[key]); done[key] = true; n++;
+        break;
+      }
+    }
+    if (n) report('info', 'PROFILE_FILLED', '프로필 ' + n + '칸 입력 (동의 체크·제출은 직접)');
+    return n;
+  }
+  var profileDone = false;
+
   /* ---------- 참여 버튼 찾기 → 강조만 ---------- */
   function candidates() {
     return document.querySelectorAll('button, a, [role=button], input[type=button], input[type=submit], input[type=image], [onclick]');
@@ -135,14 +166,14 @@
     if (!h || h.charAt(0) === '#' || /^javascript:/i.test(h)) return false;
     return el.href.split('#')[0] !== location.href.split('#')[0];
   }
-  function findByWords(words, onlyLinks) {
+  function findByWords(words, onlyLinks, allowNav) {
     if (!words || !words.length) return null;
     var els = onlyLinks ? document.querySelectorAll('a[href]') : candidates();
     var best = null, bestScore = -1e9;
     for (var i = 0; i < els.length; i++) {
       var el = els[i];
       if (!visible(el)) continue;
-      if (!onlyLinks && isNavLink(el)) continue;
+      if (!onlyLinks && !allowNav && isNavLink(el)) continue;
       var t = label(el);
       if (!t || t.length > 30) continue;
       for (var w = 0; w < words.length; w++) {
@@ -156,6 +187,16 @@
       }
     }
     return best;
+  }
+  /** 사용자가 톡으로 지정한 버튼 (주소 → 글자 순) */
+  function findPicked() {
+    if (cfg.targetSelector) {
+      try {
+        var el = document.querySelector(cfg.targetSelector);
+        if (el && visible(el)) return el;
+      } catch (e) {}
+    }
+    return cfg.targetText ? findByWords([cfg.targetText], false, true) : null; // 직접 지정한 것은 링크여도 허용
   }
   function obstructed(el) {
     var r = el.getBoundingClientRect();
@@ -212,7 +253,7 @@
 
   /* ---------- 실행 순서 ---------- */
   function navigateOnce() {
-    var nav = cfg.navKeywords || [];
+    var nav = (cfg.navText ? [cfg.navText] : []).concat(cfg.navKeywords || []);
     var key = '__eh_nav_' + (cfg.id || '');
     try { if (sessionStorage.getItem(key)) return false; } catch (e) {}
     var a = findByWords(nav, true);
@@ -229,7 +270,8 @@
     if (++ticks <= 3) closePopups(); // 처음 3초만 팝업 정리 (계속 누르지 않음)
     if (detectBlockers()) { done = true; return; }
     if (cfg.type === 'quiz' || cfg.type === 'form') fillAnswer();
-    var el = findByWords(cfg.keywords || []);
+    if (!profileDone && fillProfile()) profileDone = true;
+    var el = findPicked() || findByWords(cfg.keywords || []);
     if (el) {
       if (obstructed(el)) { closePopups(); if (obstructed(el)) { report('status', 'POPUP_BLOCKED', '팝업이 버튼을 가리고 있어요. 팝업을 직접 닫아 주세요'); } }
       highlight(el);

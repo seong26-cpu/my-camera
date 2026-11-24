@@ -49,7 +49,21 @@ object Engine {
             .put("keywords", words(recipe, "keywords", d.getJSONObject("keywords").optJSONArray(type)))
             .put("navKeywords", words(recipe, "navKeywords", d.getJSONObject("navKeywords").optJSONArray(type)))
             .put("patterns", patterns(ctx, recipe))
+            .put("targetSelector", recipe.optString("targetSelector", ""))
+            .put("targetText", recipe.optString("targetText", ""))
+            .put("navText", recipe.optString("navText", ""))
+            .also { cfg ->
+                // 프로필은 '폼 입력' 유형에만 전달 (다른 사이트 페이지에는 넣지 않음)
+                if (type == "form") {
+                    val pf = Profile.load(ctx)
+                    if (pf.length() > 0) cfg.put("profile", pf)
+                }
+            }
     }
+
+    fun pickerScript(ctx: Context, mode: String): String =
+        "window.__EH_PICK_MODE=" + JSONObject.quote(mode) + ";\n" +
+            ctx.assets.open("engine/picker.js").bufferedReader().use { it.readText() }
 
     /** 주입할 자바스크립트 (설정 + 엔진) */
     fun script(ctx: Context, recipe: JSONObject): String =
