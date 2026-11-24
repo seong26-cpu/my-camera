@@ -11,8 +11,8 @@ android {
         applicationId = "com.mycamera.eventhelper"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = 4
+        versionName = "0.4.0"
     }
 
     // 개인 설치용 고정 디버그 키 (매번 같은 서명 → 업데이트 설치 시 데이터 유지)

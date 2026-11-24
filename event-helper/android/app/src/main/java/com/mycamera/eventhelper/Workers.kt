@@ -17,7 +17,8 @@ class MorningWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params
                 }
             Notifier.notify(ctx, 1, "오늘 응모할 이벤트 ${list.size}건", names)
         }
-        Scheduler.rescheduleAll(ctx, fromWorker = true)
+        Scheduler.scheduleMorning(ctx, fromWorker = true)
+        Scheduler.scheduleOpenTimes(ctx)
         return Result.success()
     }
 }

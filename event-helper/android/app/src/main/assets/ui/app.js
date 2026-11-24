@@ -14,6 +14,8 @@ const A = window.Android || (() => {
     addLog: (j) => { const l = JSON.parse(g('logs', '[]')); l.push(JSON.parse(j)); return s('logs', JSON.stringify(l)); },
     getSettings: () => g('settings', '{}'), saveSettings: (j) => s('settings', j),
     today, appVersion: () => 'browser-preview', notifyAllowed: () => false,
+    mailTest: () => setTimeout(() => window.onMailTest({ ok: false, error: '(미리보기) 폰 앱에서만 발송돼요' }), 300),
+    mailStatus: () => '{}', sendSummaryNow: () => false,
     getProfile: () => g('profile', '{}'), saveProfile: (j) => s('profile', j), clearProfile: () => s('profile', '{}'),
     openSite: (id) => { window.__opened = id; toast('(미리보기) 응모 화면 열기: ' + id); },
     openExternal: (u) => window.open(u, '_blank'), testNotify: () => toast('(미리보기) 알림 시험'),
@@ -216,14 +218,36 @@ function renderLogs() {
 }
 
 /* ---------- 설정 ---------- */
+function mailStatusText() {
+  const st = parse(A.mailStatus ? A.mailStatus() : '{}', {});
+  if (!st.at) return '아직 보낸 메일이 없어요.';
+  return `마지막 발송 ${esc(st.at)} · ${st.ok ? '✅ 성공' : '❌ 실패: ' + esc(st.error)}`;
+}
+window.onMailTest = (r) => {
+  toast(r.ok ? '✅ 시험 메일을 보냈어요. Gmail을 확인하세요' : '❌ ' + r.error);
+  const el = $('#mailStatus'); if (el) el.innerHTML = r.ok ? '✅ 연결 성공' : '❌ ' + esc(r.error);
+};
 function renderSettings() {
   const el = $('#tab-settings');
   const profile = parse(A.getProfile ? A.getProfile() : '{}', {});
   el.innerHTML = `<label>아침 알림 시각</label>
     <input type="time" id="s-morning" value="${esc(settings.morningTime || '08:00')}">
     <p class="help">매일 이 시각에 "오늘 응모할 이벤트 N건" 알림이 옵니다. 폰 절전 때문에 몇 분 늦을 수 있어요.</p>
-    <button class="primary wide" id="saveSettings">저장</button>
     <button class="ghost wide" id="testNotify">알림 시험</button>
+    <h2>📧 Gmail 알림</h2>
+    <p class="help">내 구글 계정의 Apps Script가 <b>나에게만</b> 메일을 보냅니다 (Gmail 비밀번호는 앱에 저장하지 않음).
+    설치 방법: 저장소 <b>event-helper/apps-script/Mailer.gs</b> 맨 위 설명 (약 5분).</p>
+    <label>웹 앱 URL <small>(https://script.google.com/macros/s/…/exec)</small></label>
+    <input type="url" id="m-url" value="${esc(settings.mailUrl || '')}" placeholder="https://script.google.com/macros/s/.../exec" autocomplete="off">
+    <label>앱 연결 비밀번호 <small>(setup 실행 로그의 APP_TOKEN)</small></label>
+    <input type="password" id="m-token" value="${esc(settings.mailToken || '')}" autocomplete="off">
+    <label class="check"><input type="checkbox" id="m-fail" ${settings.mailFail !== false ? 'checked' : ''}> 실패하면 바로 메일 (네트워크 오류·버튼 못 찾음·로그인 필요 등)</label>
+    <label class="check"><input type="checkbox" id="m-summary" ${settings.mailSummary !== false ? 'checked' : ''}> 매일 저녁 하루 요약 메일 (완료·실패·아직 안 한 것)</label>
+    <label>요약 받을 시각</label><input type="time" id="m-time" value="${esc(settings.summaryTime || '21:00')}">
+    <button class="primary wide" id="saveSettings">설정 저장</button>
+    <button class="ghost wide" id="mailTest">📧 연결 시험 (시험 메일 보내기)</button>
+    <button class="ghost wide" id="summaryNow">📋 오늘 요약 지금 보내기</button>
+    <p class="help" id="mailStatus">${mailStatusText()}</p>
     <p class="help">알림 권한: <b>${A.notifyAllowed() ? '켜짐' : '꺼짐 — 폰 설정 > 앱 > 응모 도우미 > 알림'}</b></p>
     <h2>내 프로필 <small style="font-weight:400">(폼 입력형 응모 자동 채움)</small></h2>
     <p class="help">폰의 안드로이드 키 저장소로 <b>암호화</b>해 이 폰에만 저장합니다. '폼 입력' 유형 + 약관 확인한 사이트의 <b>빈 칸에만</b> 넣고,
@@ -277,10 +301,20 @@ document.addEventListener('click', (e) => {
     }
     case 'saveSettings': {
       const m = $('#s-morning').value || '08:00';
-      settings = Object.assign({}, settings, { morningTime: m });
-      toast(A.saveSettings(JSON.stringify(settings)) ? `매일 ${m} 알림으로 저장` : '저장 실패');
+      const url = $('#m-url').value.trim();
+      if (url && !/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(url)) { toast('URL은 https://script.google.com/macros/s/…/exec 형식이어야 해요'); break; }
+      settings = Object.assign({}, settings, {
+        morningTime: m, mailUrl: url, mailToken: $('#m-token').value.trim(),
+        mailFail: $('#m-fail').checked, mailSummary: $('#m-summary').checked, summaryTime: $('#m-time').value || '21:00',
+      });
+      toast(A.saveSettings(JSON.stringify(settings)) ? `저장했어요 (아침 ${m} 알림${url ? ` · 요약 메일 ${settings.summaryTime}` : ''})` : '저장 실패');
       break;
     }
+    case 'mailTest':
+      if (!settings.mailUrl || !settings.mailToken) { toast('URL과 비밀번호를 넣고 [설정 저장]부터 눌러 주세요'); break; }
+      toast('보내는 중…'); A.mailTest(); break;
+    case 'summaryNow':
+      toast(A.sendSummaryNow() ? '요약 메일을 보내는 중이에요 (인터넷 연결 시 발송)' : 'Gmail 연결 설정이 먼저 필요해요'); break;
     case 'testNotify': A.testNotify(); break;
     case 'saveProfile': {
       const pv = (id) => $(id).value.trim();

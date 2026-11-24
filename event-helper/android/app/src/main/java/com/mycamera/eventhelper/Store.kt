@@ -82,6 +82,7 @@ object Store {
         for (i in start until old.length()) out.put(old.get(i))
         out.put(entry)
         write(ctx, LOGS, out.toString())
+        Mailer.onLog(ctx, entry) // 실패면 Gmail 즉시 알림 (설정 켜짐 + 연결됨일 때만)
     }
 
     /** 오늘 응모 대상인가 (켜짐 + 기간 안) */

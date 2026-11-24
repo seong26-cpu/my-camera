@@ -83,6 +83,21 @@ class MainActivity : Activity() {
         } catch (e: Exception) { false }
         @JavascriptInterface fun clearProfile() = Profile.clear(ctx)
 
+        /** Gmail 알림: 연결 시험 (결과는 window.onMailTest(결과) 로 돌려줌) */
+        @JavascriptInterface fun mailTest() {
+            Thread {
+                val err = Mailer.post(ctx, "test", "연결 확인", "응모 도우미 메일 알림이 정상 연결됐어요.\n실패 알림과 저녁 요약이 이 주소로 옵니다.")
+                val res = JSONObject().put("ok", err == null).put("error", err ?: "").toString()
+                runOnUiThread { web.evaluateJavascript("window.onMailTest && onMailTest($res)", null) }
+            }.start()
+        }
+        @JavascriptInterface fun mailStatus(): String = Mailer.status(ctx)
+        @JavascriptInterface fun sendSummaryNow(): Boolean {
+            if (!Mailer.configured(ctx)) return false
+            val (subject, text) = Mailer.summaryText(ctx)
+            Mailer.enqueue(ctx, "summary", subject, text); return true
+        }
+
         @JavascriptInterface fun today(): String = Store.today()
         @JavascriptInterface fun appVersion(): String =
             packageManager.getPackageInfo(packageName, 0).versionName ?: ""
