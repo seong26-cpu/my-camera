@@ -16,6 +16,8 @@ const A = window.Android || (() => {
     today, appVersion: () => 'browser-preview', notifyAllowed: () => false,
     mailTest: () => setTimeout(() => window.onMailTest({ ok: false, error: '(미리보기) 폰 앱에서만 발송돼요' }), 300),
     mailStatus: () => '{}', sendSummaryNow: () => false,
+    shareFile: (name, mime, content) => { window.__shared = { name, mime, content }; return true; },
+    pickBackup: () => {}, replaceLogs: (j) => s('logs', j),
     getProfile: () => g('profile', '{}'), saveProfile: (j) => s('profile', j), clearProfile: () => s('profile', '{}'),
     openSite: (id) => { window.__opened = id; toast('(미리보기) 응모 화면 열기: ' + id); },
     openExternal: (u) => window.open(u, '_blank'), testNotify: () => toast('(미리보기) 알림 시험'),
@@ -204,13 +206,52 @@ function saveEditor() {
   saveRecipes(); editingId = null; toast('저장했어요'); renderAll();
 }
 
+/* ---------- 내보내기 · 백업 ---------- */
+/** CSV 칸: 쉼표·따옴표·줄바꿈은 따옴표로 감싸고, =,+,-,@ 로 시작하면(엑셀 수식 주입 방지) 앞에 ' 를 붙임 */
+function csvCell(v) {
+  let t = String(v == null ? '' : v);
+  if (/^[=+\-@\t\r]/.test(t)) t = "'" + t;
+  return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+}
+function buildCsv(list) {
+  const rows = [['날짜시간', '이벤트', '결과', '결과코드', '내용']];
+  list.forEach((l) => rows.push([(l.ts || l.date || '').replace('T', ' ').slice(0, 19), l.name, (CODES[l.code] || [l.code])[0], l.code, l.message || '']));
+  return '\uFEFF' + rows.map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n'; // BOM: 엑셀에서 한글 안 깨짐
+}
+function buildBackup() {
+  const st = Object.assign({}, settings);
+  delete st.mailToken; // 비밀번호는 백업에 넣지 않음 (복원 후 다시 입력)
+  return JSON.stringify({ app: 'event-helper', format: 1, exportedAt: new Date().toISOString(), version: A.appVersion(),
+    recipes, settings: st, logs }, null, 1);
+}
+/** 백업 파일 검사 → 문제 있으면 이유 문자열, 괜찮으면 null */
+function checkBackup(b) {
+  if (!b || b.app !== 'event-helper' || b.format !== 1) return '응모 도우미 백업 파일이 아니에요';
+  if (!Array.isArray(b.recipes) || b.recipes.some((r) => !r || typeof r.id !== 'string' || !r.name || !r.url)) return '이벤트 목록 형식이 올바르지 않아요';
+  if (!Array.isArray(b.logs) || (b.settings && typeof b.settings !== 'object')) return '기록 형식이 올바르지 않아요';
+  return null;
+}
+window.onBackupPicked = (text) => {
+  const b = parse(text, null);
+  const err = checkBackup(b);
+  if (err) { toast('❌ ' + err); return; }
+  if (!confirm(`백업(${(b.exportedAt || '').slice(0, 10)})으로 바꿀까요?\n이벤트 ${b.recipes.length}개 · 기록 ${b.logs.length}건\n지금 목록과 기록은 백업 내용으로 바뀝니다.`)) return;
+  const keep = { mailToken: settings.mailToken }; // 이 폰의 메일 비밀번호는 유지
+  A.saveRecipes(JSON.stringify(b.recipes));
+  A.replaceLogs(JSON.stringify(b.logs));
+  A.saveSettings(JSON.stringify(Object.assign({}, b.settings || {}, keep.mailToken ? keep : {})));
+  toast('복원했어요'); renderAll();
+};
+const stamp = () => A.today().replace(/-/g, '');
+
 /* ---------- 기록 ---------- */
 function renderLogs() {
   const el = $('#tab-logs');
   const recent = logs.slice(-200).reverse();
   if (!recent.length) { el.innerHTML = `<div class="empty">아직 기록이 없어요.</div>`; return; }
   const fails = recent.filter((l) => !DONE.has(l.code)).length;
-  el.innerHTML = `<p class="help">최근 ${recent.length}건 · 실패/확인 필요 ${fails}건</p>` +
+  el.innerHTML = `<button class="ghost wide" id="exportCsv">📤 기록 CSV 내보내기 (엑셀)</button>
+    <p class="help">최근 ${recent.length}건 · 실패/확인 필요 ${fails}건</p>` +
     recent.map((l) => `<div class="card">
       <div class="row"><div class="grow"><div class="name">${esc(l.name)}</div>
       <div class="meta">${esc((l.ts || l.date || '').replace('T', ' ').slice(0, 16))} ${codeBadge(l.code)}</div>
@@ -258,6 +299,11 @@ function renderSettings() {
     <label>생년월일 <small>(예: 19800101)</small></label><input type="text" inputmode="numeric" id="p-birth" value="${esc(profile.birth || '')}" autocomplete="off">
     <button class="primary wide" id="saveProfile">프로필 암호화 저장</button>
     <button class="danger wide" id="clearProfile">프로필 지우기</button>
+    <h2>💾 백업 · 복원</h2>
+    <p class="help">폰을 바꾸거나 앱을 다시 설치하기 전에 백업 파일을 만들어 드라이브·메일에 보관하세요.
+    (이벤트·기록·설정 포함 / <b>메일 비밀번호와 프로필은 보안상 제외</b> → 복원 후 다시 입력)</p>
+    <button class="ghost wide" id="exportBackup">💾 전체 백업 파일 만들기</button>
+    <button class="ghost wide" id="importBackup">📂 백업 파일 불러오기</button>
     <h2>안전 원칙</h2>
     <p class="help">· 최종 제출·캡차·약관 동의는 항상 직접 누릅니다.<br>
     · 캡차 자동 풀이, 여러 계정, 초 단위 연타 기능은 없습니다 (사이트 약관·계정 보호).<br>
@@ -316,6 +362,11 @@ document.addEventListener('click', (e) => {
     case 'summaryNow':
       toast(A.sendSummaryNow() ? '요약 메일을 보내는 중이에요 (인터넷 연결 시 발송)' : 'Gmail 연결 설정이 먼저 필요해요'); break;
     case 'testNotify': A.testNotify(); break;
+    case 'exportCsv':
+      toast(A.shareFile(`응모기록_${stamp()}.csv`, 'text/csv', buildCsv(logs)) ? `기록 ${logs.length}건 — 저장할 곳을 고르세요` : '내보내기 실패'); break;
+    case 'exportBackup':
+      toast(A.shareFile(`응모도우미_백업_${stamp()}.json`, 'application/json', buildBackup()) ? '백업 파일 — 드라이브나 메일에 저장하세요' : '백업 실패'); break;
+    case 'importBackup': A.pickBackup(); break;
     case 'saveProfile': {
       const pv = (id) => $(id).value.trim();
       const pf = { name: pv('#p-name'), phone: pv('#p-phone').replace(/\D/g, ''), email: pv('#p-email'), birth: pv('#p-birth').replace(/\D/g, '') };

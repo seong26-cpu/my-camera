@@ -19,7 +19,7 @@
 | 2 | 자동 보조 엔진 (팝업 닫기·입력·버튼 강조 → 직접 누름, 결과 자동 판정) + 추천 이벤트 100곳 | ✅ |
 | 3 | 🎯 버튼 톡 지정(참여 버튼·메뉴), 프로필 암호화 저장 → 폼 빈 칸 자동 입력 | ✅ |
 | 4 | 📧 Gmail 알림: 실패 즉시 + 저녁 하루 요약 (내 Apps Script → 나에게만) | ✅ |
-| 5 | 로그 내보내기, 서명키 정식화, 마무리 | 예정 |
+| 5 | 📤 기록 CSV · 💾 전체 백업/복원 · 🔑 비공개 서명키 지원 · 빌드 전 자동 시험 | ✅ |
 
 ## 추천 이벤트 100곳
 - [🗂 이벤트] 탭 → **⭐ 추천 이벤트 불러오기** → 원하는 곳만 **켜기**
@@ -64,8 +64,33 @@
 - 일부 이벤트는 **앱 전용**(증권사·카드사 앱 안)이라 앱 안 브라우저로 못 엽니다 → 앱 주소(intent://, 앱 스킴)를 넣으면 그 앱을 바로 엽니다.
 - 구글 계정 로그인은 앱 안 브라우저(WebView)에서 구글 정책상 막힙니다. 네이버·카카오 등은 사이트마다 다를 수 있어 실제 폰 확인이 필요합니다.
 - 알림은 안드로이드 절전 때문에 몇 분 늦을 수 있습니다 (초 단위 정확도 아님).
-- `android/keystore/debug.keystore` 는 업데이트 설치 때 데이터가 지워지지 않도록 **고정한 개인용 디버그 서명키**입니다(공개된 기본 비밀번호). 5단계에서 비공개 키로 바꾸는 방법을 안내합니다.
+- `android/keystore/debug.keystore` 는 업데이트 때 데이터가 지워지지 않도록 **고정한 개인용 디버그 서명키**입니다(공개된 기본 비밀번호). 다른 곳에서 받은 '응모 도우미' APK는 설치하지 마세요. 더 안전하게 하려면 아래 🔑 비공개 키로 바꾸세요.
+
+## 📤 기록 CSV · 💾 백업/복원 (5단계)
+- **📜 기록 탭 → 📤 CSV 내보내기**: 엑셀에서 한글이 깨지지 않게 저장. 사이트 문구가 `=`, `+` 등으로 시작하면 엑셀 수식으로 실행되지 않게 앞에 `'`를 붙임
+- **⚙ 설정 → 💾 전체 백업 파일 만들기**: 이벤트·기록·설정을 한 파일로 → 드라이브나 메일에 보관
+  - **메일 비밀번호와 프로필은 보안상 빠집니다** (복원 후 다시 입력)
+- **📂 백업 파일 불러오기**: 새 폰이나 다시 설치한 뒤 복원. 형식 검사 후 확인을 받고 바꿉니다
+
+## 🔑 비공개 서명키로 바꾸기 (선택)
+> ⚠ 서명키가 바뀌면 안드로이드가 '다른 앱'으로 봐서 **한 번은 지우고 새로 설치**해야 합니다. 꼭 **💾 백업부터** 하세요.
+
+1. PC(자바 설치)에서: `keytool -genkeypair -v -keystore eh-release.jks -alias eventhelper -keyalg RSA -keysize 2048 -validity 10000`
+2. 파일을 글자로 바꾸기
+   - Windows PowerShell: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("eh-release.jks")) | Set-Clipboard`
+   - Mac: `base64 -i eh-release.jks | pbcopy`
+3. GitHub 저장소 → Settings → Secrets and variables → Actions → New repository secret 4개
+   - `EH_KEYSTORE_BASE64`(2번 글자) · `EH_KEYSTORE_PASSWORD` · `EH_KEY_ALIAS`(`eventhelper`) · `EH_KEY_PASSWORD`
+4. Actions → event-helper APK → Run workflow → 새 APK 설치 → 💾 백업 불러오기
+- `eh-release.jks`와 비밀번호는 잃어버리면 업데이트를 못 하니 안전한 곳에 보관하고, **채팅이나 저장소에 올리지 마세요.**
+
+## 🛡 Play 프로텍트 경고를 없애려면
+| 방법 | 장점 | 단점 |
+|---|---|---|
+| 지금처럼 직접 설치 | 무료, 바로 됨 | 업데이트 때마다 Play 프로텍트 경고가 뜰 수 있음 |
+| Play Console **내부 테스트** 배포 | 스토어 앱처럼 설치·자동 업데이트, 경고 없음 | 개발자 계정 등록비, 최신 targetSdk 등 Play 정책 충족 필요 (진행할 때 최신 조건 확인) |
+| 안드로이드 개발자 인증 | 앞으로의 의무화 대비 | 4개국은 2026년 9월, 전 세계는 2027년 이후 예정 (한국 날짜 미확인) |
 
 ## 개발
-- 빌드: GitHub Actions(`.github/workflows/event-helper-apk.yml`)가 푸시 때마다 APK를 만들어 Release에 올립니다.
+- 빌드: GitHub Actions(`.github/workflows/event-helper-apk.yml`)가 푸시 때마다 **시험(메일 중계 8개 + 엔진 33개)을 먼저 돌리고**, 통과하면 APK를 만들어 Release에 올립니다. 시험이 하나라도 실패하면 APK를 올리지 않습니다.
 - 화면 미리보기: `android/app/src/main/assets/ui/index.html` 을 PC 브라우저로 열면 가짜 저장소로 동작합니다.

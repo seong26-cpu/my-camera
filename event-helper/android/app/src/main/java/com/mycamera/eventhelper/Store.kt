@@ -85,6 +85,14 @@ object Store {
         Mailer.onLog(ctx, entry) // 실패면 Gmail 즉시 알림 (설정 켜짐 + 연결됨일 때만)
     }
 
+    /** 백업 복원: 기록 전체 교체 (최근 MAX_LOGS 개만) */
+    fun replaceLogs(ctx: Context, text: String) = synchronized(lock) {
+        val arr = JSONArray(text)
+        val out = JSONArray()
+        for (i in maxOf(0, arr.length() - MAX_LOGS) until arr.length()) out.put(arr.get(i))
+        write(ctx, LOGS, out.toString())
+    }
+
     /** 오늘 응모 대상인가 (켜짐 + 기간 안) */
     fun isActiveToday(r: JSONObject): Boolean {
         if (!r.optBoolean("enabled", true)) return false

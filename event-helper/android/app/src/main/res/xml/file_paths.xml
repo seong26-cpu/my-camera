@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 내보내기 파일(CSV·백업)은 앱 임시 폴더의 exports 에만 만들고 공유 -->
+    <cache-path name="exports" path="exports/" />
+</paths>

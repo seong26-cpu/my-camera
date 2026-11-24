@@ -11,17 +11,26 @@ android {
         applicationId = "com.mycamera.eventhelper"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "0.4.0"
+        versionCode = 5
+        versionName = "1.0.0"
     }
 
-    // 개인 설치용 고정 디버그 키 (매번 같은 서명 → 업데이트 설치 시 데이터 유지)
+    // 서명 키: GitHub Secrets 에 비공개 키가 있으면 그것을, 없으면 저장소의 고정 디버그 키를 사용
+    // (고정 키 → 매번 같은 서명 → 업데이트 설치 시 데이터 유지). 비공개 키 등록 방법: event-helper/README.md
+    val privateKs = System.getenv("EH_KEYSTORE")?.takeIf { it.isNotBlank() && file(it).exists() }
     signingConfigs {
         getByName("debug") {
-            storeFile = file("../keystore/debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+            if (privateKs != null) {
+                storeFile = file(privateKs)
+                storePassword = System.getenv("EH_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("EH_KEY_ALIAS")
+                keyPassword = System.getenv("EH_KEY_PASSWORD") ?: System.getenv("EH_KEYSTORE_PASSWORD")
+            } else {
+                storeFile = file("../keystore/debug.keystore")
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
         }
     }
     buildTypes {

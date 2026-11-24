@@ -25,8 +25,32 @@ jobs:
         with:
           gradle-version: "8.11.1"
 
+      - name: 엔진·메일 중계 시험 (자동 제출 0회 등)
+        run: |
+          cd event-helper/test
+          npm init -y >/dev/null && npm install --no-audit --no-fund playwright@1.49.1 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+          node mailer.test.js
+          node engine.test.js
+
+      - name: 비공개 서명 키 준비 (Secrets 에 있을 때만)
+        env:
+          KS: ${{ secrets.EH_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KS" ]; then
+            echo "$KS" | base64 -d > "$RUNNER_TEMP/eh.jks"
+            echo "EH_KEYSTORE=$RUNNER_TEMP/eh.jks" >> "$GITHUB_ENV"
+            echo "비공개 키로 서명합니다"
+          else
+            echo "Secrets 없음 → 저장소의 고정 디버그 키로 서명합니다"
+          fi
+
       - name: Build APK
         working-directory: event-helper/android
+        env:
+          EH_KEYSTORE_PASSWORD: ${{ secrets.EH_KEYSTORE_PASSWORD }}
+          EH_KEY_ALIAS: ${{ secrets.EH_KEY_ALIAS }}
+          EH_KEY_PASSWORD: ${{ secrets.EH_KEY_PASSWORD }}
         run: gradle assembleDebug --no-daemon --stacktrace
 
       - name: Rename APK
