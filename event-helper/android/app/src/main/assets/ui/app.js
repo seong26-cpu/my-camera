@@ -33,7 +33,27 @@ const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&':
 const parse = (t, d) => { try { return JSON.parse(t); } catch (e) { return d; } };
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
-let recipes = [], logs = [], settings = {}, editingId = null;
+let recipes = [], logs = [], settings = {}, editingId = null, catFilter = '';
+const PRESETS = window.PRESETS || [];
+
+/** 자동 보조 상태: on(약관 확인함) / lock(약관 제한) / off(미확인) */
+function assistState(r) {
+  if (r.tosStatus === 'restricted') return 'lock';
+  return r.tosChecked ? 'on' : 'off';
+}
+function assistBadge(r) {
+  const st = assistState(r);
+  if (st === 'lock') return '<span class="badge bad">🔒 바로가기만</span>';
+  if (st === 'on') return '<span class="badge ok">🤖 자동 보조</span>';
+  return '<span class="badge">약관 미확인</span>';
+}
+function importPresets() {
+  const have = new Set(recipes.map((r) => r.id));
+  let n = 0;
+  PRESETS.forEach((p) => { if (!have.has(p.id)) { recipes.push(Object.assign({}, p)); n++; } });
+  saveRecipes();
+  return n;
+}
 
 function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.classList.add('show');
@@ -84,7 +104,7 @@ function renderToday() {
         <div class="row">
           <div class="grow">
             <div class="name">${esc(r.name)}</div>
-            <div class="meta"><span class="badge">${esc(TYPES[r.type] || r.type)}</span>${r.openTime ? `<span class="badge warn">${esc(r.openTime)} 오픈</span>` : ''}${l ? codeBadge(l.code) : ''}</div>
+            <div class="meta"><span class="badge">${esc(TYPES[r.type] || r.type)}</span>${r.openTime ? `<span class="badge warn">${esc(r.openTime)} 오픈</span>` : ''}${assistBadge(r)}${l ? codeBadge(l.code) : ''}</div>
             ${r.quizAnswer ? `<div class="meta">오늘 정답: <b>${esc(r.quizAnswer)}</b> (열면 자동 복사)</div>` : ''}
           </div>
           <button class="${done ? 'ghost' : 'primary'}" data-open="${esc(r.id)}">${done ? '다시 열기' : '응모하기 ▶'}</button>
@@ -97,17 +117,28 @@ function renderToday() {
 function renderManage() {
   const el = $('#tab-manage');
   if (editingId !== null) { renderEditor(el); return; }
-  el.innerHTML = `<button class="primary wide" id="addBtn">＋ 이벤트 추가</button>
-    <h2>등록된 이벤트 (${recipes.length})</h2>` +
-    (recipes.length ? recipes.map((r) => `<div class="card">
+  const notImported = PRESETS.filter((p) => !recipes.some((r) => r.id === p.id)).length;
+  const cats = [...new Set(recipes.map((r) => r.cat).filter(Boolean))];
+  const shown = recipes.filter((r) => !catFilter || r.cat === catFilter);
+  const onCount = recipes.filter((r) => r.enabled !== false).length;
+  el.innerHTML = `<button class="primary wide" id="addBtn">＋ 이벤트 직접 추가</button>
+    ${notImported ? `<button class="ghost wide" id="presetBtn">⭐ 추천 이벤트 ${notImported}곳 불러오기 (꺼진 상태로 추가)</button>` : ''}
+    <p class="help">추천 목록은 2026-11-24 검색으로 주소를 확인한 곳입니다. 진행 여부·약관은 직접 확인 후 <b>켜기</b>를 누르세요.
+    🔒 표시는 이벤트 유의사항에 '비정상적 방법·프로그램 참여 금지' 문구가 확인되어 자동 보조 없이 바로가기만 합니다.</p>
+    <h2>등록된 이벤트 (${recipes.length}, 켜짐 ${onCount})</h2>
+    ${cats.length ? `<select id="catSel"><option value="">전체 분야</option>${cats.map((c) => `<option ${c === catFilter ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>` : ''}` +
+    (shown.length ? shown.map((r) => `<div class="card ${r.enabled === false ? 'done' : ''}">
       <div class="row">
         <div class="grow">
-          <div class="name">${esc(r.name)} ${r.enabled === false ? '<span class="badge bad">꺼짐</span>' : ''}</div>
-          <div class="meta"><span class="badge">${esc(TYPES[r.type] || r.type)}</span>${r.start || r.end ? `${esc(r.start || '…')} ~ ${esc(r.end || '…')}` : '매일'}</div>
-          <div class="meta">${esc(r.url)}</div>
+          <div class="name">${esc(r.name)}</div>
+          <div class="meta">${r.cat ? `<span class="badge">${esc(r.cat)}</span>` : ''}<span class="badge">${esc(TYPES[r.type] || r.type)}</span>${assistBadge(r)}${r.start || r.end ? `${esc(r.start || '…')} ~ ${esc(r.end || '…')}` : ''}</div>
+          ${(r.flags || []).map((f) => `<div class="meta">· ${esc(f)}</div>`).join('')}
         </div>
-        <button class="ghost" data-edit="${esc(r.id)}">수정</button>
-      </div></div>`).join('') : `<div class="empty">아직 없어요. [＋ 이벤트 추가]를 눌러 주세요.</div>`) +
+        <div>
+          <button class="${r.enabled === false ? 'primary' : 'ghost'}" data-toggle="${esc(r.id)}">${r.enabled === false ? '켜기' : '끄기'}</button><br>
+          <button class="ghost" data-edit="${esc(r.id)}" style="margin-top:6px">수정</button>
+        </div>
+      </div></div>`).join('') : `<div class="empty">아직 없어요. [⭐ 추천 이벤트 불러오기] 또는 [＋ 직접 추가]를 눌러 주세요.</div>`) +
     `<h2>백업 · 복원</h2>
      <p class="help">아래 글자를 복사해 메모 앱 등에 보관하면, 폰을 바꿔도 붙여넣어 복원할 수 있어요.</p>
      <textarea id="backup">${esc(JSON.stringify(recipes, null, 1))}</textarea>
@@ -130,10 +161,18 @@ function renderEditor(el) {
     <input type="time" id="f-open" value="${esc(r.openTime || '')}">
     <label>오늘의 정답 <small>(퀴즈 · 열 때 자동 복사)</small></label>
     <input type="text" id="f-answer" value="${esc(r.quizAnswer || '')}">
+    <label>찾을 버튼 글자 <small>(쉼표로 구분 · 비우면 유형별 기본값)</small></label>
+    <input type="text" id="f-keywords" value="${esc(Array.isArray(r.keywords) ? r.keywords.join(', ') : (r.keywords || ''))}" placeholder="예: 출석체크하기, 응모하기">
+    <label>이동할 메뉴 글자 <small>(이벤트 모음에서 찾아 들어갈 메뉴 · 비우면 기본값)</small></label>
+    <input type="text" id="f-nav" value="${esc(Array.isArray(r.navKeywords) ? r.navKeywords.join(', ') : (r.navKeywords || ''))}" placeholder="예: 출석체크">
     <label>메모</label><input type="text" id="f-note" value="${esc(r.note || '')}">
+    ${(r.flags || []).map((f) => `<p class="help">· ${esc(f)}</p>`).join('')}
+    ${r.source ? `<p class="help">주소 출처: 웹 검색 (${esc(r.checkedAt || '')})</p>` : ''}
     <label class="check"><input type="checkbox" id="f-enabled" ${r.enabled !== false ? 'checked' : ''}> 사용 (끄면 오늘 목록에 안 나옴)</label>
-    <label class="check"><input type="checkbox" id="f-tos" ${r.tosChecked ? 'checked' : ''}>
-      이 사이트 이벤트 약관을 읽었고, 자동화 금지 조항이 없음을 확인함 <small>(2단계 자동 보조는 이 체크가 있어야 켜짐)</small></label>
+    ${r.tosStatus === 'restricted'
+      ? `<p class="help">🔒 <b>자동 보조 사용 불가</b> — ${esc(r.tosNote || '')}<br>그래서 이 사이트는 알림·바로가기·기록만 합니다.</p>`
+      : `<label class="check"><input type="checkbox" id="f-tos" ${r.tosChecked ? 'checked' : ''}>
+      이 사이트 이용약관·이벤트 유의사항을 읽었고, 매크로·자동화 프로그램 금지 조항이 없음을 확인함 <small>(체크해야 자동 보조가 켜짐)</small></label>`}
     <button class="primary wide" id="saveBtn">저장</button>
     <button class="ghost wide" id="cancelBtn">취소</button>
     ${r.id ? `<button class="danger wide" id="delBtn">삭제</button>` : ''}`;
@@ -150,7 +189,9 @@ function saveEditor() {
   const r = Object.assign({}, old, {
     id: old.id || newId(), name, url, type: v('#f-type'), start, end,
     openTime: v('#f-open'), quizAnswer: v('#f-answer'), note: v('#f-note'),
-    enabled: $('#f-enabled').checked, tosChecked: $('#f-tos').checked,
+    keywords: v('#f-keywords'), navKeywords: v('#f-nav'),
+    enabled: $('#f-enabled').checked,
+    tosChecked: old.tosStatus === 'restricted' ? false : !!($('#f-tos') && $('#f-tos').checked),
   });
   const i = recipes.findIndex((x) => x.id === r.id);
   if (i >= 0) recipes[i] = r; else recipes.push(r);
@@ -198,8 +239,14 @@ document.addEventListener('click', (e) => {
   }
   if (b.dataset.open) { A.openSite(b.dataset.open); return; }
   if (b.dataset.edit) { editingId = b.dataset.edit; renderManage(); window.scrollTo(0, 0); return; }
+  if (b.dataset.toggle) {
+    const r = recipes.find((x) => x.id === b.dataset.toggle);
+    if (r) { r.enabled = r.enabled === false; saveRecipes(); toast(r.enabled ? `켰어요 — 오늘 목록에 나와요` : '껐어요'); renderAll(); }
+    return;
+  }
   switch (b.id) {
     case 'addBtn': editingId = ''; renderManage(); break;
+    case 'presetBtn': { const n = importPresets(); toast(`${n}곳 추가 (꺼진 상태). 원하는 곳만 [켜기] 하세요`); renderAll(); break; }
     case 'cancelBtn': editingId = null; renderManage(); break;
     case 'saveBtn': saveEditor(); break;
     case 'delBtn':
@@ -222,6 +269,10 @@ document.addEventListener('click', (e) => {
     }
     case 'testNotify': A.testNotify(); break;
   }
+});
+
+document.addEventListener('change', (e) => {
+  if (e.target.id === 'catSel') { catFilter = e.target.value; renderManage(); }
 });
 
 window.onAppResume = renderAll;

@@ -25,12 +25,14 @@ import android.webkit.WebViewClient
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.webkit.JavascriptInterface
 import android.widget.Toast
 import org.json.JSONObject
 
 /**
  * 응모 화면: 이벤트 사이트를 앱 안 브라우저로 엶 (로그인 쿠키 유지).
- * 1단계: 바로 열기 + 정답 복사 + 결과 기록. (자동 입력·클릭 보조는 2단계에서 추가)
+ * - 바로 열기 + 정답 복사 + 결과 기록
+ * - 자동 보조(engine/runner.js): 약관 확인 체크 + 약관 제한 아님 일 때만. 팝업 닫기·입력·버튼 강조까지
  * 원칙: 최종 제출·캡차·약관 동의는 사용자가 직접 누름.
  */
 class SiteActivity : Activity() {
@@ -40,6 +42,10 @@ class SiteActivity : Activity() {
     private var lastAlert = ""
     private var lastError = ""
     private var lastErrorCode = ""
+    private var assist = false
+    private var patterns = JSONObject()
+    private var retried = false
+    private val autoLogged = mutableSetOf<String>()
     private val handler = Handler(Looper.getMainLooper())
     private val timeoutMs = 30_000L
     private val timeoutCheck = Runnable {
@@ -55,6 +61,10 @@ class SiteActivity : Activity() {
         recipe = Store.recipe(this, id) ?: run {
             Toast.makeText(this, "이벤트를 찾을 수 없어요", Toast.LENGTH_SHORT).show(); finish(); return
         }
+
+        val restricted = recipe.optString("tosStatus") == "restricted"
+        assist = recipe.optBoolean("tosChecked", false) && !restricted
+        patterns = Engine.patterns(this, recipe)
 
         val dp = resources.displayMetrics.density
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -120,26 +130,35 @@ class SiteActivity : Activity() {
 
             override fun onPageFinished(view: WebView, url: String) {
                 handler.removeCallbacks(timeoutCheck)
-                if (lastErrorCode == "TIMEOUT") { lastErrorCode = ""; lastError = "" }
+                if (lastErrorCode == "TIMEOUT" || lastErrorCode == "NETWORK_ERROR") { lastErrorCode = ""; lastError = "" }
+                if (assist && (url.startsWith("http://") || url.startsWith("https://"))) {
+                    view.evaluateJavascript(Engine.script(this@SiteActivity, recipe), null)
+                }
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                 if (!request.isForMainFrame) return
                 lastErrorCode = "NETWORK_ERROR"
                 lastError = "네트워크 오류: ${error.description}"
-                showStatus("⚠ $lastError")
+                if (!retried) {
+                    retried = true
+                    showStatus("⚠ $lastError — 3초 뒤 한 번 다시 시도합니다")
+                    handler.postDelayed({ if (!isFinishing) web.reload() }, 3000)
+                } else showStatus("⚠ $lastError — 와이파이/데이터를 확인하고 [↻ 새로고침]")
             }
         }
         web.webChromeClient = object : WebChromeClient() {
             override fun onJsAlert(view: WebView, url: String, message: String, result: JsResult): Boolean {
                 lastAlert = message
                 showStatus("💬 사이트 메시지: $message")
+                judge(message, "알림창")
                 return false // 기본 알림창 그대로 보여줌
             }
 
             override fun onJsConfirm(view: WebView, url: String, message: String, result: JsResult): Boolean {
                 lastAlert = message
                 showStatus("💬 사이트 확인창: $message")
+                judge(message, "확인창")
                 return false
             }
         }
@@ -152,15 +171,29 @@ class SiteActivity : Activity() {
             cm.setPrimaryClip(ClipData.newPlainText("정답", answer))
             notes.add("📋 오늘 정답 '$answer' 복사됨 (붙여넣기 하세요)")
         }
-        if (!recipe.optBoolean("tosChecked", false)) notes.add("ℹ 약관 확인 전: 바로가기만 (자동 보조 꺼짐)")
+        when {
+            restricted -> notes.add("🔒 이 사이트는 이벤트 유의사항에 '비정상적 방법·프로그램 참여 금지' 문구가 있어 바로가기만 합니다")
+            !assist -> notes.add("ℹ 약관 확인 전: 바로가기만 (자동 보조 꺼짐)")
+            else -> notes.add("🤖 자동 보조 켜짐: 팝업 정리·입력·버튼 강조 (누르는 건 직접)")
+        }
+        if (assist) web.addJavascriptInterface(EngineBridge(), "EHBridge")
         if (notes.isNotEmpty()) showStatus(notes.joinToString("\n"))
 
         val url = recipe.optString("url")
         if (url.startsWith("http://") || url.startsWith("https://")) web.loadUrl(url) else openNonWeb(url)
     }
 
-    /** intent://, 앱 전용 주소(예: 증권사 앱) → 해당 앱 열기 */
+    /** intent://, 앱 전용 주소(예: 증권사 앱), package:앱이름 → 해당 앱 열기 */
     private fun openNonWeb(url: String) {
+        if (url.startsWith("package:")) {
+            val pkg = url.removePrefix("package:")
+            val launch = packageManager.getLaunchIntentForPackage(pkg)
+            if (launch != null) { startActivity(launch); showStatus("📱 앱을 열었어요. 참여 후 돌아와서 결과를 눌러 주세요") }
+            else try {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg")))
+            } catch (_: Exception) { showStatus("⚠ 앱이 설치돼 있지 않아요: $pkg") }
+            return
+        }
         try {
             val i = if (url.startsWith("intent:")) Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
             else Intent(Intent.ACTION_VIEW, Uri.parse(url))
@@ -172,6 +205,45 @@ class SiteActivity : Activity() {
             val fallback = try { Intent.parseUri(url, Intent.URI_INTENT_SCHEME).getStringExtra("browser_fallback_url") } catch (_: Exception) { null }
             if (!fallback.isNullOrEmpty() && ::web.isInitialized) web.loadUrl(fallback)
             else showStatus("⚠ 이 주소를 열 앱이 폰에 없어요: $url")
+        }
+    }
+
+    /** 사이트 문구로 결과 판정 → 성공/이미참여/마감/오답은 자동 기록, 로그인·캡차는 안내 */
+    private fun judge(text: String, from: String) {
+        val (code, word) = Engine.classify(patterns, text) ?: return
+        when (code) {
+            "LOGIN_REQUIRED", "CAPTCHA" -> {
+                lastErrorCode = code
+                showStatus(if (code == "CAPTCHA") "🧩 캡차가 있어요. 직접 풀어 주세요" else "🔑 로그인이 필요해요. 직접 로그인해 주세요 (한 번 하면 유지)")
+            }
+            else -> autoRecord(code, "[자동·$from] \"$word\" / $text")
+        }
+    }
+
+    private fun autoRecord(code: String, msg: String) {
+        if (!autoLogged.add(code)) return
+        Store.addLog(this, recipe.optString("id"), recipe.optString("name"), code, msg.take(300))
+        val label = mapOf("SUCCESS" to "성공", "ALREADY_DONE" to "이미 참여", "CLOSED" to "마감", "FAILED" to "실패(오답 등)")[code] ?: code
+        showStatus("📝 자동 판정: $label → 기록했어요. 다르면 아래 버튼으로 고쳐 주세요")
+    }
+
+    /** runner.js → 안드로이드 보고 통로. 기록·안내만 가능 (다른 데이터 접근 없음) */
+    inner class EngineBridge {
+        @JavascriptInterface
+        fun report(json: String) {
+            val r = try { JSONObject(json) } catch (e: Exception) { return }
+            val code = r.optString("code"); val msg = r.optString("msg")
+            runOnUiThread {
+                when (r.optString("type")) {
+                    "result" -> if (code in setOf("SUCCESS", "ALREADY_DONE", "CLOSED", "FAILED")) autoRecord(code, "[자동·화면] $msg")
+                        else if (code == "LOGIN_REQUIRED" || code == "CAPTCHA") { lastErrorCode = code; showStatus("⚠ $msg") }
+                    "status" -> {
+                        if (code in setOf("LOGIN_REQUIRED", "CAPTCHA", "POPUP_BLOCKED", "SELECTOR_NOT_FOUND")) lastErrorCode = code
+                        showStatus((if (code == "READY") "👆 " else "⚠ ") + msg)
+                    }
+                    "info" -> if (code != "ENGINE_START") showStatus("🤖 $msg")
+                }
+            }
         }
     }
 
