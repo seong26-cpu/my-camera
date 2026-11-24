@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>응모 도우미</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <h1>응모 도우미</h1>
+  <span id="todaySummary" class="summary"></span>
+</header>
+
+<main>
+  <section id="tab-today" class="tab active"></section>
+  <section id="tab-manage" class="tab"></section>
+  <section id="tab-logs" class="tab"></section>
+  <section id="tab-settings" class="tab"></section>
+</main>
+
+<nav class="tabs">
+  <button data-tab="today" class="on">📅<span>오늘</span></button>
+  <button data-tab="manage">🗂<span>이벤트</span></button>
+  <button data-tab="logs">📜<span>기록</span></button>
+  <button data-tab="settings">⚙<span>설정</span></button>
+</nav>
+
+<div id="toast" class="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>
