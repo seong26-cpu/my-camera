@@ -96,8 +96,8 @@ function check(name, cond, info) {
   check('자동 제출 0회', (await p.evaluate(() => window.__submitted)) === 0, null);
 
   console.log('10) 사이트 알림창 문구 판정 (안드로이드도 같은 규칙 사용)');
-  const cls = await p.evaluate(() => [__EH.classify('이미 출석하셨습니다'), __EH.classify('이미 출석 완료'), __EH.classify('이벤트가 종료되었습니다'), __EH.classify('로그인이 필요합니다'), __EH.classify('안녕하세요')]);
-  check('알림 판정', cls[0][0] === 'ALREADY_DONE' && cls[1][0] === 'ALREADY_DONE' && cls[2][0] === 'CLOSED' && cls[3][0] === 'LOGIN_REQUIRED' && cls[4] === null, cls);
+  const cls = await p.evaluate(() => [__EH.classify('이미 출석하셨습니다'), __EH.classify('이미 출석 완료'), __EH.classify('이벤트가 종료되었습니다'), __EH.classify('로그인이 필요합니다'), __EH.classify('안녕하세요'), __EH.classify('행사기간이 아닙니다.')]);
+  check('알림 판정', cls[0][0] === 'ALREADY_DONE' && cls[1][0] === 'ALREADY_DONE' && cls[2][0] === 'CLOSED' && cls[3][0] === 'LOGIN_REQUIRED' && cls[4] === null && cls[5][0] === 'CLOSED', cls);
 
   console.log('11) 폼: 프로필 빈 칸만 입력 · 아이디/검색/나뉜 칸/동의 체크박스는 안 건드림');
   const pf = { name: '홍길동', phone: '01012345678', email: 'me@example.com' };

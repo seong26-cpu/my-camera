@@ -55,7 +55,7 @@ object Mailer {
     fun label(code: String) = mapOf(
         "SUCCESS" to "성공", "ALREADY_DONE" to "이미 참여", "CLOSED" to "마감", "USER_SKIPPED" to "건너뜀",
         "FAILED" to "실패", "NETWORK_ERROR" to "네트워크 오류", "TIMEOUT" to "시간 초과", "LOGIN_REQUIRED" to "로그인 필요",
-        "CAPTCHA" to "캡차", "POPUP_BLOCKED" to "팝업 방해", "SELECTOR_NOT_FOUND" to "버튼 못 찾음"
+        "CAPTCHA" to "캡차", "POPUP_BLOCKED" to "팝업 방해", "SELECTOR_NOT_FOUND" to "버튼 못 찾음", "APP_ONLY" to "앱 전용"
     )[code] ?: code
 
     /** 오늘 하루 요약 글 만들기 */

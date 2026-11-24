@@ -94,9 +94,8 @@ class SiteActivity : Activity() {
         btn(row1, "🔁 이미 참여") { record("ALREADY_DONE") }
         btn(row1, "⛔ 마감") { record("CLOSED") }
         btn(row2, "⏭ 건너뜀") { record("USER_SKIPPED") }
-        btn(row2, "⚠ 실패") { record(lastErrorCode.ifEmpty { "FAILED" }) }
-        btn(row2, "↻ 새로고침") { web.reload() }
-        if (assist) btn(row2, "🎯 버튼 지정") { choosePick() }
+        btn(row2, "⚠ 실패") { if (lastErrorCode.isNotEmpty()) record(lastErrorCode) else askFailReason() }
+        btn(row2, "⋯ 더보기") { moreMenu() }
 
         web = WebView(this)
         root.addView(title, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
@@ -182,7 +181,63 @@ class SiteActivity : Activity() {
         if (notes.isNotEmpty()) showStatus(notes.joinToString("\n"))
 
         val url = recipe.optString("url")
-        if (url.startsWith("http://") || url.startsWith("https://")) web.loadUrl(url) else openNonWeb(url)
+        if (url.startsWith("http://") || url.startsWith("https://")) {
+            web.loadUrl(url)
+            // '앱에서만 참여'로 기록한 이벤트는 처음부터 앱(또는 기본 브라우저)으로 연다
+            if (recipe.optBoolean("appOnly", false)) openInApp(url)
+        } else openNonWeb(url)
+    }
+
+    /** 실패 이유 고르기 → 원인별 코드로 기록 (CSV·메일에서 원인 구분) */
+    private fun askFailReason() {
+        val items = arrayOf("버튼을 못 찾음", "로그인이 안 됨", "페이지가 안 열림", "앱에서만 참여 가능", "이벤트가 없음·끝남", "기타")
+        val codes = arrayOf("SELECTOR_NOT_FOUND", "LOGIN_REQUIRED", "NETWORK_ERROR", "APP_ONLY", "CLOSED", "FAILED")
+        AlertDialog.Builder(this).setTitle("왜 실패했나요?")
+            .setItems(items) { _, w ->
+                if (codes[w] == "APP_ONLY") {
+                    Store.updateRecipe(this, recipe.optString("id")) { it.put("appOnly", true) }
+                    Toast.makeText(this, "다음부터 앱으로 바로 열어요", Toast.LENGTH_LONG).show()
+                }
+                record(codes[w], "사용자 선택: ${items[w]}")
+            }
+            .setNegativeButton("취소", null).show()
+    }
+
+    /** ⋯ 더보기: 새로고침 · 앱으로 열기 · 지금 주소 저장 · 버튼 지정 */
+    private fun moreMenu() {
+        val labels = mutableListOf("↻ 새로고침", "📱 앱으로 열기 (설치된 쇼핑몰 앱)", "📌 지금 보는 페이지를 이 이벤트 주소로 저장")
+        if (assist) labels.add("🎯 버튼 지정")
+        AlertDialog.Builder(this).setItems(labels.toTypedArray()) { _, w ->
+            when (w) {
+                0 -> web.reload()
+                1 -> openInApp(web.url ?: recipe.optString("url"))
+                2 -> saveCurrentUrl()
+                3 -> choosePick()
+            }
+        }.show()
+    }
+
+    /** 이 앱이 아닌 곳(쇼핑몰 앱이 링크를 지원하면 그 앱, 아니면 기본 브라우저)으로 열기 */
+    private fun openInApp(url: String) {
+        if (!url.startsWith("http")) { openNonWeb(url); return }
+        try {
+            val i = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE)
+            startActivity(Intent.createChooser(i, "열 앱 선택").putExtra(
+                Intent.EXTRA_EXCLUDE_COMPONENTS, arrayOf(android.content.ComponentName(this, SiteActivity::class.java))))
+            showStatus("📱 앱/브라우저로 열었어요. 참여 후 돌아와서 결과를 눌러 주세요")
+        } catch (e: Exception) { showStatus("⚠ 열 수 있는 앱이 없어요") }
+    }
+
+    /** 월별로 바뀌는 이벤트: 이번 달 페이지를 찾아 들어간 뒤 그 주소를 저장 */
+    private fun saveCurrentUrl() {
+        val cur = web.url ?: return
+        if (!cur.startsWith("http")) { showStatus("⚠ 웹 주소만 저장할 수 있어요"); return }
+        Store.updateRecipe(this, recipe.optString("id")) { r ->
+            r.put("url", cur); r.put("flags", org.json.JSONArray()); r.put("checkedAt", Store.today() + " 직접 저장")
+            r.remove("appOnly")
+        }
+        recipe.put("url", cur)
+        showStatus("📌 이 페이지를 이벤트 주소로 저장했어요 — 다음부터 여기로 바로 열려요")
     }
 
     /** intent://, 앱 전용 주소(예: 증권사 앱), package:앱이름 → 해당 앱 열기 */
@@ -290,10 +345,21 @@ class SiteActivity : Activity() {
         runOnUiThread { status.text = text; status.visibility = View.VISIBLE }
     }
 
-    private fun record(code: String) {
-        val msg = listOf(lastAlert, lastError).filter { it.isNotEmpty() }.joinToString(" / ")
+    private fun record(code: String, extra: String = "") {
+        val msg = listOf(extra, lastAlert, lastError).filter { it.isNotEmpty() }.joinToString(" / ")
         Store.addLog(this, recipe.optString("id"), recipe.optString("name"), code, msg)
         Toast.makeText(this, "기록했어요", Toast.LENGTH_SHORT).show()
+        // 오래된·월별 추천 주소가 '마감'이면 끌지 물어봄 (매일 헛걸음 방지)
+        val stale = (recipe.optJSONArray("flags")?.length() ?: 0) > 0
+        if (code == "CLOSED" && stale) {
+            AlertDialog.Builder(this)
+                .setMessage("이 추천 주소는 지난 이벤트일 가능성이 커요.\n\n· 끄기: 오늘 목록에서 빼요\n· 이번 달 새 출석 페이지를 찾았다면 [⋯ 더보기 → 📌 주소 저장]을 쓰세요")
+                .setPositiveButton("끄기") { _, _ -> Store.updateRecipe(this, recipe.optString("id")) { it.put("enabled", false) }; finish() }
+                .setNegativeButton("그대로 두기") { _, _ -> finish() }
+                .setOnCancelListener { finish() }
+                .show()
+            return
+        }
         finish()
     }
 

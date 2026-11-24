@@ -30,6 +30,7 @@ const CODES = {
   FAILED: ['실패', 'bad'], NETWORK_ERROR: ['네트워크 오류', 'bad'], TIMEOUT: ['시간 초과', 'bad'],
   LOGIN_REQUIRED: ['로그인 필요', 'warn'], CAPTCHA: ['캡차 대기', 'warn'], POPUP_BLOCKED: ['팝업 방해', 'bad'],
   SELECTOR_NOT_FOUND: ['버튼 못 찾음', 'bad'],
+  APP_ONLY: ['앱 전용', 'warn'],
 };
 const DONE = new Set(['SUCCESS', 'ALREADY_DONE', 'CLOSED', 'USER_SKIPPED']);
 
