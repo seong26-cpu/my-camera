@@ -128,7 +128,8 @@ window.PRESETS = [
    "월별로 주소가 바뀜 → 앱이 출석·퀴즈 메뉴를 자동으로 찾아 이동 (못 찾으면 주소 수정)",
    "오래된 자료 · 종료됐을 수 있음 (진행 여부 확인)"
   ],
-  "tosStatus": "unknown"
+  "tosStatus": "unknown",
+  "group": "L.POINT"
  },
  {
   "id": "p009",
@@ -271,7 +272,8 @@ window.PRESETS = [
    "월별로 주소가 바뀜 → 앱이 출석·퀴즈 메뉴를 자동으로 찾아 이동 (못 찾으면 주소 수정)",
    "오래된 자료 · 종료됐을 수 있음 (진행 여부 확인)"
   ],
-  "tosStatus": "unknown"
+  "tosStatus": "unknown",
+  "group": "CJ ONE"
  },
  {
   "id": "p018",
@@ -379,7 +381,8 @@ window.PRESETS = [
   "flags": [
    "앱에서만 참여하는 이벤트일 수 있음"
   ],
-  "tosStatus": "unknown"
+  "tosStatus": "unknown",
+  "group": "L.POINT"
  },
  {
   "id": "p025",
@@ -425,7 +428,8 @@ window.PRESETS = [
   "source": "https://display.cjonstyle.com/p/exhibition/exhibitionDetail?plnExhbId=202207190738",
   "checkedAt": "2026-11-24",
   "flags": [],
-  "tosStatus": "unknown"
+  "tosStatus": "unknown",
+  "group": "CJ ONE"
  },
  {
   "id": "p028",
@@ -455,7 +459,8 @@ window.PRESETS = [
   "flags": [
    "앱에서만 참여하는 이벤트일 수 있음"
   ],
-  "tosStatus": "unknown"
+  "tosStatus": "unknown",
+  "group": "L.POINT"
  },
  {
   "id": "p030",
@@ -533,7 +538,8 @@ window.PRESETS = [
   "flags": [
    "월별로 주소가 바뀜 → 앱이 출석·퀴즈 메뉴를 자동으로 찾아 이동 (못 찾으면 주소 수정)"
   ],
-  "tosStatus": "unknown"
+  "tosStatus": "unknown",
+  "group": "L.POINT"
  },
  {
   "id": "p035",
@@ -593,7 +599,8 @@ window.PRESETS = [
   "source": "https://kor.lottedfs.com/kr/eventmain/benefit",
   "checkedAt": "2026-11-24",
   "flags": [],
-  "tosStatus": "unknown"
+  "tosStatus": "unknown",
+  "group": "L.POINT"
  },
  {
   "id": "p039",
@@ -727,7 +734,8 @@ window.PRESETS = [
   "source": "https://cgv.co.kr/evt/giveawayState",
   "checkedAt": "2026-11-24",
   "flags": [],
-  "tosStatus": "unknown"
+  "tosStatus": "unknown",
+  "group": "CJ ONE"
  },
  {
   "id": "p048",
@@ -744,7 +752,8 @@ window.PRESETS = [
    "단일 이벤트 페이지 · 기간이 끝나면 꺼 주세요",
    "앱에서만 참여하는 이벤트일 수 있음"
   ],
-  "tosStatus": "unknown"
+  "tosStatus": "unknown",
+  "group": "L.POINT"
  },
  {
   "id": "p049",
@@ -804,7 +813,8 @@ window.PRESETS = [
   "source": "https://www.cjone.com/cjmweb/event-coupon/stamp/list.do",
   "checkedAt": "2026-11-24",
   "flags": [],
-  "tosStatus": "unknown"
+  "tosStatus": "unknown",
+  "group": "CJ ONE"
  },
  {
   "id": "p053",
@@ -820,7 +830,8 @@ window.PRESETS = [
   "flags": [
    "오래된 자료 · 종료됐을 수 있음 (진행 여부 확인)"
   ],
-  "tosStatus": "unknown"
+  "tosStatus": "unknown",
+  "group": "L.POINT"
  },
  {
   "id": "p054",
@@ -1366,7 +1377,8 @@ window.PRESETS = [
   "flags": [
    "단일 이벤트 페이지 · 기간이 끝나면 꺼 주세요"
   ],
-  "tosStatus": "unknown"
+  "tosStatus": "unknown",
+  "group": "L.POINT"
  },
  {
   "id": "p089",
@@ -1396,7 +1408,8 @@ window.PRESETS = [
   "source": "https://m.cjthemarket.com/the/event/raffle",
   "checkedAt": "2026-11-24",
   "flags": [],
-  "tosStatus": "unknown"
+  "tosStatus": "unknown",
+  "group": "CJ ONE"
  },
  {
   "id": "p091",

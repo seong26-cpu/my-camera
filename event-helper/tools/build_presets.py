@@ -122,6 +122,15 @@ E = [
 ('K-water 퀴즈 이벤트','https://www.kwater.or.kr/news/event/waterDay2026EventView.do?pageNo=1&event_seq=20260318&s_mid=1678','quiz','공공','O',''),
 ('국민권익위 독자퀴즈','https://www.acrc.go.kr/briefs/202110/sub_11.html','quiz','공공','O',''),
 ]
+# 같은 그룹 멤버십 (근거: CJ ONE = 올리브영·CGV·더마켓·온스타일 등 CJ 브랜드 통합 로그인(SSO) — cjnews.cj.net/?p=81148,
+#  L.POINT = 롯데 유통 계열사 통합 멤버십, 롯데백화점·하이마트 이벤트는 'L.POINT 통합회원' 조건 — 각 이벤트 페이지/롯데쇼핑 안내)
+GROUP = {
+ 'CJ온스타일 출석체크': 'CJ ONE', 'CJ ONE 진행중 득템프(출석)': 'CJ ONE', 'CJ더마켓 래플': 'CJ ONE',
+ 'CGV 경품 현황': 'CJ ONE', '올리브영 출석체크 기획전': 'CJ ONE',
+ '롯데ON 출석체크존': 'L.POINT', '롯데백화점 출석체크': 'L.POINT', '롯데홈쇼핑 매일 룰렛': 'L.POINT',
+ '롯데하이마트 출석체크': 'L.POINT', '롯데면세점 혜택': 'L.POINT', '롯데시네마 이벤트': 'L.POINT',
+ '롯데잇츠 이벤트': 'L.POINT', 'L.POINT 이벤트': 'L.POINT',
+}
 FLAG = {'M':'월별로 주소가 바뀜 → 앱이 출석·퀴즈 메뉴를 자동으로 찾아 이동 (못 찾으면 주소 수정)','O':'오래된 자료 · 종료됐을 수 있음 (진행 여부 확인)','A':'앱에서만 참여하는 이벤트일 수 있음','D':'단일 이벤트 페이지 · 기간이 끝나면 꺼 주세요'}
 out = []
 for i, (name, url, typ, cat, flags, tos) in enumerate(E, 1):
@@ -133,6 +142,8 @@ for i, (name, url, typ, cat, flags, tos) in enumerate(E, 1):
     else:
         r['tosStatus'] = 'unknown'
     if name.startswith('야놀자 NOL DRAW'): r['openTime'] = '10:00'
+    g = GROUP.get(name)
+    if g: r['group'] = g
     out.append(r)
 urls = [r['url'] for r in out]
 assert len(urls) == len(set(urls)), 'duplicate url'
@@ -142,4 +153,5 @@ with open(dst, 'w', encoding='utf-8') as f:
     f.write('window.PRESETS = ' + json.dumps(out, ensure_ascii=False, indent=1) + ';\n')
 from urllib.parse import urlparse
 hosts = set(urlparse(u).netloc.replace('www.','').replace('m.','',1) if not u.startswith('package:') else u for u in urls)
-print('entries', len(out), 'restricted', sum(r['tosStatus']==R for r in out), 'distinct hosts', len(hosts))
+assert all(n in [e[0] for e in E] for n in GROUP), 'GROUP name typo'
+print('groups', sum('group' in r for r in out), 'entries', len(out), 'restricted', sum(r['tosStatus']==R for r in out), 'distinct hosts', len(hosts))

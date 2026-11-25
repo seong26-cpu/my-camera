@@ -39,6 +39,8 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <receiver android:name=".RecordReceiver" android:exported="false" />
+
         <activity
             android:name=".SiteActivity"
             android:exported="false"

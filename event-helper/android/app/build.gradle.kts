@@ -11,8 +11,8 @@ android {
         applicationId = "com.mycamera.eventhelper"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "1.1.0"
+        versionCode = 7
+        versionName = "1.2.0"
     }
 
     // 서명 키: GitHub Secrets 에 비공개 키가 있으면 그것을, 없으면 저장소의 고정 디버그 키를 사용

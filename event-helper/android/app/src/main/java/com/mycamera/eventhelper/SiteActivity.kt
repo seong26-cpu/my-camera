@@ -63,6 +63,13 @@ class SiteActivity : Activity() {
             Toast.makeText(this, "이벤트를 찾을 수 없어요", Toast.LENGTH_SHORT).show(); finish(); return
         }
 
+        // 📱 연결 앱 또는 🌐 브라우저로 지정된 이벤트: 바로 열고 이 화면은 닫음 (결과는 알림에서)
+        if (recipe.optString("appPackage").isNotEmpty() || recipe.optBoolean("useBrowser", false)) {
+            val ok = AppLauncher.open(this, recipe)
+            Toast.makeText(this, if (ok) "열었어요 — 참여 후 알림의 버튼으로 결과를 남기세요" else "연결된 앱을 찾을 수 없어요. 이벤트 수정에서 연결을 해제해 주세요", Toast.LENGTH_LONG).show()
+            finish(); return
+        }
+
         val restricted = recipe.optString("tosStatus") == "restricted"
         assist = recipe.optBoolean("tosChecked", false) && !restricted
         patterns = Engine.patterns(this, recipe)
@@ -119,12 +126,14 @@ class SiteActivity : Activity() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url.toString()
                 val scheme = request.url.scheme ?: ""
+                if (isGoogleLogin(url)) { handleGoogleLogin(url); return true }
                 if (scheme == "http" || scheme == "https") return false
                 openNonWeb(url)
                 return true
             }
 
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+                if (isGoogleLogin(url)) { view.stopLoading(); handleGoogleLogin(url); return }
                 handler.removeCallbacks(timeoutCheck)
                 handler.postDelayed(timeoutCheck, timeoutMs)
             }
@@ -184,7 +193,7 @@ class SiteActivity : Activity() {
         if (url.startsWith("http://") || url.startsWith("https://")) {
             web.loadUrl(url)
             // '앱에서만 참여'로 기록한 이벤트는 처음부터 앱(또는 기본 브라우저)으로 연다
-            if (recipe.optBoolean("appOnly", false)) openInApp(url)
+            if (recipe.optBoolean("appOnly", false)) pickApp()
         } else openNonWeb(url)
     }
 
@@ -205,27 +214,48 @@ class SiteActivity : Activity() {
 
     /** ⋯ 더보기: 새로고침 · 앱으로 열기 · 지금 주소 저장 · 버튼 지정 */
     private fun moreMenu() {
-        val labels = mutableListOf("↻ 새로고침", "📱 앱으로 열기 (설치된 쇼핑몰 앱)", "📌 지금 보는 페이지를 이 이벤트 주소로 저장")
+        val labels = mutableListOf("↻ 새로고침", "📱 앱으로 열기 · 다음부터 바로 (앱 고르기)", "📌 지금 보는 페이지를 이 이벤트 주소로 저장")
         if (assist) labels.add("🎯 버튼 지정")
         AlertDialog.Builder(this).setItems(labels.toTypedArray()) { _, w ->
             when (w) {
                 0 -> web.reload()
-                1 -> openInApp(web.url ?: recipe.optString("url"))
+                1 -> pickApp()
                 2 -> saveCurrentUrl()
                 3 -> choosePick()
             }
         }.show()
     }
 
-    /** 이 앱이 아닌 곳(쇼핑몰 앱이 링크를 지원하면 그 앱, 아니면 기본 브라우저)으로 열기 */
-    private fun openInApp(url: String) {
-        if (!url.startsWith("http")) { openNonWeb(url); return }
-        try {
-            val i = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE)
-            startActivity(Intent.createChooser(i, "열 앱 선택").putExtra(
-                Intent.EXTRA_EXCLUDE_COMPONENTS, arrayOf(android.content.ComponentName(this, SiteActivity::class.java))))
-            showStatus("📱 앱/브라우저로 열었어요. 참여 후 돌아와서 결과를 눌러 주세요")
-        } catch (e: Exception) { showStatus("⚠ 열 수 있는 앱이 없어요") }
+    /** 열 앱 고르기 (한 번 고르면 기억 → 다음부터 [응모하기]가 그 앱을 바로 실행) */
+    private fun pickApp() {
+        val apps = AppLauncher.installedApps(this)
+        val labels = arrayOf("🌐 기본 브라우저 (구글 로그인 사이트 등)") + apps.map { it.label }.toTypedArray()
+        AlertDialog.Builder(this).setTitle("어느 앱으로 열까요? (다음부터 바로 열려요)")
+            .setItems(labels) { _, w ->
+                Store.updateRecipe(this, recipe.optString("id")) { r ->
+                    r.remove("appOnly")
+                    if (w == 0) { r.put("useBrowser", true); r.remove("appPackage"); r.remove("appLabel") }
+                    else { r.put("appPackage", apps[w - 1].pkg); r.put("appLabel", apps[w - 1].label); r.remove("useBrowser") }
+                }
+                val fresh = Store.recipe(this, recipe.optString("id")) ?: recipe
+                val cur = web.url?.takeIf { it.startsWith("http") }
+                AppLauncher.open(this, fresh, cur)
+                Toast.makeText(this, "연결했어요. 앱 안 경로는 [이벤트 수정 → 경로 메모]에 적어 두면 알림에 나와요", Toast.LENGTH_LONG).show()
+                finish()
+            }
+            .setNegativeButton("취소", null).show()
+    }
+
+    /** 구글 로그인 화면은 앱 안 브라우저에서 막힘(구글 정책) → 기본 브라우저로 넘기고, 다음부터 브라우저로 열기 */
+    private var googleHandled = false
+    private fun isGoogleLogin(url: String?): Boolean = try { Uri.parse(url ?: "").host == "accounts.google.com" } catch (e: Exception) { false }
+    private fun handleGoogleLogin(url: String) {
+        if (googleHandled) return
+        googleHandled = true
+        Store.updateRecipe(this, recipe.optString("id")) { r -> r.put("useBrowser", true); r.remove("appOnly") }
+        AppLauncher.open(this, recipe, url)
+        Toast.makeText(this, "구글 로그인은 앱 안에서 막혀 있어(구글 정책) 브라우저로 열었어요. 다음부터 이 이벤트는 브라우저로 열려요", Toast.LENGTH_LONG).show()
+        finish()
     }
 
     /** 월별로 바뀌는 이벤트: 이번 달 페이지를 찾아 들어간 뒤 그 주소를 저장 */

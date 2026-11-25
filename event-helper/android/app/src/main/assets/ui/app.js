@@ -47,6 +47,14 @@ function assistState(r) {
   if (r.tosStatus === 'restricted') return 'lock';
   return r.tosChecked ? 'on' : 'off';
 }
+const GROUP_LABEL = { 'CJ ONE': 'CJ ONE 계열', 'L.POINT': '롯데 L.POINT 계열' };
+/** 여는 방식 표시: 연결 앱 / 브라우저 */
+function openBadge(r) {
+  if (r.appPackage) return `<span class="badge warn">📱 ${esc(r.appLabel || '앱')}</span>`;
+  if (r.useBrowser) return '<span class="badge warn">🌐 브라우저</span>';
+  return '';
+}
+function groupBadge(r) { return r.group ? `<span class="badge ok">👥 ${esc(GROUP_LABEL[r.group] || r.group)}</span>` : ''; }
 function assistBadge(r) {
   const st = assistState(r);
   if (st === 'lock') return '<span class="badge bad">🔒 바로가기만</span>';
@@ -66,7 +74,12 @@ function toast(msg) {
   clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), 2200);
 }
 function load() {
-  recipes = parse(A.getRecipes(), []); logs = parse(A.getLogs(), []); settings = parse(A.getSettings(), {});
+  recipes = parse(A.getRecipes(), []);
+  // 예전에 불러온 추천 이벤트에도 그룹(통합회원) 정보 채우기
+  const byId = Object.fromEntries(PRESETS.map((p) => [p.id, p]));
+  recipes.forEach((r) => { if (r.preset && byId[r.id] && byId[r.id].group && !r.group) r.group = byId[r.id].group; });
+  logs = parse(A.getLogs(), []);
+  settings = parse(A.getSettings(), {});
 }
 function saveRecipes() {
   if (!A.saveRecipes(JSON.stringify(recipes))) toast('저장 실패 — 다시 시도해 주세요');
@@ -110,10 +123,10 @@ function renderToday() {
         <div class="row">
           <div class="grow">
             <div class="name">${esc(r.name)}</div>
-            <div class="meta"><span class="badge">${esc(TYPES[r.type] || r.type)}</span>${r.openTime ? `<span class="badge warn">${esc(r.openTime)} 오픈</span>` : ''}${assistBadge(r)}${l ? codeBadge(l.code) : ''}</div>
+            <div class="meta"><span class="badge">${esc(TYPES[r.type] || r.type)}</span>${r.openTime ? `<span class="badge warn">${esc(r.openTime)} 오픈</span>` : ''}${openBadge(r)}${assistBadge(r)}${l ? codeBadge(l.code) : ''}</div>
             ${r.quizAnswer ? `<div class="meta">오늘 정답: <b>${esc(r.quizAnswer)}</b> (열면 자동 복사)</div>` : ''}
           </div>
-          <button class="${done ? 'ghost' : 'primary'}" data-open="${esc(r.id)}">${done ? '다시 열기' : '응모하기 ▶'}</button>
+          <button class="${done ? 'ghost' : 'primary'}" data-open="${esc(r.id)}">${done ? '다시 열기' : (r.appPackage || r.useBrowser ? '앱으로 ▶' : '응모하기 ▶')}</button>
         </div>
       </div>`;
     }).join('');
@@ -125,19 +138,21 @@ function renderManage() {
   if (editingId !== null) { renderEditor(el); return; }
   const notImported = PRESETS.filter((p) => !recipes.some((r) => r.id === p.id)).length;
   const cats = [...new Set(recipes.map((r) => r.cat).filter(Boolean))];
-  const shown = recipes.filter((r) => !catFilter || r.cat === catFilter);
+  const shown = recipes.filter((r) => !catFilter || r.cat === catFilter || ('g:' + r.group) === catFilter);
   const onCount = recipes.filter((r) => r.enabled !== false).length;
   el.innerHTML = `<button class="primary wide" id="addBtn">＋ 이벤트 직접 추가</button>
     ${notImported ? `<button class="ghost wide" id="presetBtn">⭐ 추천 이벤트 ${notImported}곳 불러오기 (꺼진 상태로 추가)</button>` : ''}
     <p class="help">추천 목록은 2026-11-24 검색으로 주소를 확인한 곳입니다. 진행 여부·약관은 직접 확인 후 <b>켜기</b>를 누르세요.
     🔒 표시는 이벤트 유의사항에 '비정상적 방법·프로그램 참여 금지' 문구가 확인되어 자동 보조 없이 바로가기만 합니다.</p>
     <h2>등록된 이벤트 (${recipes.length}, 켜짐 ${onCount})</h2>
-    ${cats.length ? `<select id="catSel"><option value="">전체 분야</option>${cats.map((c) => `<option ${c === catFilter ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>` : ''}` +
+    <p class="help">👥 <b>가입 팁</b>: <b>CJ ONE</b>(올리브영·CGV·온스타일·더마켓 등)과 <b>L.POINT</b>(롯데 계열) 통합회원부터 만들면 가입 횟수가 줄어요.
+    아래 분야에서 '👥 … 계열'을 고르면 모아 볼 수 있어요. (사이트마다 'CJ ONE/L.POINT로 로그인' 버튼이 있는지 확인)</p>
+    ${cats.length ? `<select id="catSel"><option value="">전체 분야</option>${Object.keys(GROUP_LABEL).map((g) => `<option value="g:${esc(g)}" ${('g:' + g) === catFilter ? 'selected' : ''}>👥 ${esc(GROUP_LABEL[g])}</option>`).join('')}${cats.map((c) => `<option ${c === catFilter ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>` : ''}` +
     (shown.length ? shown.map((r) => `<div class="card ${r.enabled === false ? 'done' : ''}">
       <div class="row">
         <div class="grow">
           <div class="name">${esc(r.name)}</div>
-          <div class="meta">${r.cat ? `<span class="badge">${esc(r.cat)}</span>` : ''}<span class="badge">${esc(TYPES[r.type] || r.type)}</span>${assistBadge(r)}${r.start || r.end ? `${esc(r.start || '…')} ~ ${esc(r.end || '…')}` : ''}</div>
+          <div class="meta">${r.cat ? `<span class="badge">${esc(r.cat)}</span>` : ''}${groupBadge(r)}<span class="badge">${esc(TYPES[r.type] || r.type)}</span>${openBadge(r)}${assistBadge(r)}${r.start || r.end ? `${esc(r.start || '…')} ~ ${esc(r.end || '…')}` : ''}</div>
           ${(r.flags || []).map((f) => `<div class="meta">· ${esc(f)}</div>`).join('')}
         </div>
         <div>
@@ -174,6 +189,11 @@ function renderEditor(el) {
     ${r.targetText || r.targetSelector || r.navText ? `<p class="help">🎯 직접 지정함: ${r.targetText ? `참여 버튼 "<b>${esc(r.targetText)}</b>"` : ''} ${r.navText ? `· 메뉴 "<b>${esc(r.navText)}</b>"` : ''}
       <button class="ghost" id="clearPick" style="padding:4px 10px;font-size:13px">지정 지우기</button></p>`
       : `<p class="help">🎯 버튼을 못 찾으면: 응모 화면 아래 <b>[🎯 버튼 지정]</b> → 사이트의 버튼을 톡 하면 기억해요 (약관 확인 사이트만).</p>`}
+    <h2>📱 여는 방식</h2>
+    <p class="help">${r.appPackage ? `<b>📱 ${esc(r.appLabel || r.appPackage)}</b> 앱으로 바로 열어요.` : r.useBrowser ? '<b>🌐 기본 브라우저</b>로 바로 열어요 (구글 로그인 사이트 등).' : '앱 안 브라우저로 열어요 (로그인 유지 · 자동 보조 가능).'}
+    ${r.appPackage || r.useBrowser ? '<button class="ghost" id="unlinkApp" style="padding:4px 10px;font-size:13px">앱 안 브라우저로 되돌리기</button>' : '앱 전용 이벤트면 응모 화면 [⋯ 더보기 → 📱 앱으로 열기]에서 앱을 고르세요.'}</p>
+    <label>앱 안 경로 메모 <small>(앱으로 열 때 알림에 표시 · 예: 마이 → 출석체크)</small></label>
+    <input type="text" id="f-path" value="${esc(r.appPath || '')}" placeholder="예: 혜택 탭 → 출석체크">
     <label>메모</label><input type="text" id="f-note" value="${esc(r.note || '')}">
     ${(r.flags || []).map((f) => `<p class="help">· ${esc(f)}</p>`).join('')}
     ${r.source ? `<p class="help">주소 출처: 웹 검색 (${esc(r.checkedAt || '')})</p>` : ''}
@@ -197,7 +217,7 @@ function saveEditor() {
   const old = recipes.find((x) => x.id === editingId) || {};
   const r = Object.assign({}, old, {
     id: old.id || newId(), name, url, type: v('#f-type'), start, end,
-    openTime: v('#f-open'), quizAnswer: v('#f-answer'), note: v('#f-note'),
+    openTime: v('#f-open'), quizAnswer: v('#f-answer'), note: v('#f-note'), appPath: v('#f-path'),
     keywords: v('#f-keywords'), navKeywords: v('#f-nav'),
     enabled: $('#f-enabled').checked,
     tosChecked: old.tosStatus === 'restricted' ? false : !!($('#f-tos') && $('#f-tos').checked),
@@ -379,6 +399,11 @@ document.addEventListener('click', (e) => {
     case 'clearProfile':
       if (confirm('프로필을 지울까요?')) { A.clearProfile(); toast('지웠어요'); renderSettings(); }
       break;
+    case 'unlinkApp': {
+      const r = recipes.find((x) => x.id === editingId);
+      if (r) { delete r.appPackage; delete r.appLabel; delete r.useBrowser; delete r.appOnly; saveRecipes(); toast('앱 안 브라우저로 되돌렸어요'); renderManage(); }
+      break;
+    }
     case 'clearPick': {
       const r = recipes.find((x) => x.id === editingId);
       if (r) { delete r.targetSelector; delete r.targetText; delete r.navText; saveRecipes(); toast('지정을 지웠어요'); renderManage(); }
