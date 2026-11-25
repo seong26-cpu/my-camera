@@ -32,6 +32,7 @@ jobs:
           npx playwright install --with-deps chromium >/dev/null
           node mailer.test.js
           node engine.test.js
+          node ui.test.js
 
       - name: 비공개 서명 키 준비 (Secrets 에 있을 때만)
         env:

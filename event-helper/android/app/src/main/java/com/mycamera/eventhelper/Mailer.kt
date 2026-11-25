@@ -87,6 +87,13 @@ object Mailer {
         if (pending.isNotEmpty()) {
             sb.append("⏳ 아직 안 함 (오늘 자정 전까지)\n"); pending.forEach { sb.append("· ${it.optString("name")}\n") }
         }
+        val recs = Store.recipes(ctx)
+        val autoOff = (0 until recs.length()).mapNotNull { recs.optJSONObject(it) }
+            .filter { it.optJSONObject("autoOff")?.optString("date") == today }
+        if (autoOff.isNotEmpty()) {
+            sb.append("\n🧹 자동으로 끈 이벤트 (앱 이벤트 탭에서 다시 켤 수 있어요)\n")
+            autoOff.forEach { sb.append("· ${it.optString("name")} — ${it.optJSONObject("autoOff")?.optString("reason")}\n") }
+        }
         val subject = "$today 완료 ${done.size} / 실패 ${fails.size} / 남음 ${pending.size}"
         return subject to sb.toString()
     }

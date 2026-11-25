@@ -83,6 +83,27 @@ object Store {
         out.put(entry)
         write(ctx, LOGS, out.toString())
         Mailer.onLog(ctx, entry) // 실패면 Gmail 즉시 알림 (설정 켜짐 + 연결됨일 때만)
+        autoOffIfDead(ctx, old, entry)
+    }
+
+    private val DEAD_CODES = setOf("CLOSED", "SELECTOR_NOT_FOUND")
+
+    /** 🧹 같은 이벤트가 어제도 오늘도 마감/버튼 못 찾음 → 자동으로 끄기 (저녁 요약 메일에 보고, 언제든 다시 켜기) */
+    private fun autoOffIfDead(ctx: Context, old: JSONArray, e: JSONObject) {
+        val code = e.optString("code"); val id = e.optString("recipeId")
+        if (code !in DEAD_CODES || id.isEmpty()) return
+        val yesterday = LocalDate.parse(e.optString("date", today())).minusDays(1).toString()
+        var prev: JSONObject? = null // 어제의 마지막 기록
+        for (i in old.length() - 1 downTo 0) {
+            val l = old.optJSONObject(i) ?: continue
+            if (l.optString("recipeId") == id && l.optString("date") == yesterday) { prev = l; break }
+        }
+        if (prev == null || prev.optString("code") !in DEAD_CODES) return
+        updateRecipe(ctx, id) { r ->
+            if (!r.optBoolean("enabled", true)) return@updateRecipe
+            r.put("enabled", false)
+            r.put("autoOff", JSONObject().put("date", today()).put("reason", if (code == "CLOSED") "2일 연속 마감" else "2일 연속 버튼 못 찾음"))
+        }
     }
 
     /** 백업 복원: 기록 전체 교체 (최근 MAX_LOGS 개만) */

@@ -28,12 +28,14 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.webkit.JavascriptInterface
 import android.widget.Toast
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
  * 응모 화면: 이벤트 사이트를 앱 안 브라우저로 엶 (로그인 쿠키 유지).
  * - 바로 열기 + 정답 복사 + 결과 기록
  * - 자동 보조(engine/runner.js): 약관 확인 체크 + 약관 제한 아님 일 때만. 팝업 닫기·입력·버튼 강조까지
+ * - 모드: single(하나만) / queue(▶ 연속 응모: 결과가 나오면 2초 뒤 다음 사이트) / login(🔑 로그인 몰아서 하기)
  * 원칙: 최종 제출·캡차·약관 동의는 사용자가 직접 누름.
  */
 class SiteActivity : Activity() {
@@ -47,6 +49,19 @@ class SiteActivity : Activity() {
     private var patterns = JSONObject()
     private var retried = false
     private val autoLogged = mutableSetOf<String>()
+
+    // ▶ 연속 응모 / 🔑 로그인 몰아서 하기
+    private var mode = "single"
+    private var queue = arrayListOf<String>()
+    private var pos = 0
+    private val loginList = arrayListOf<String>()
+    private var qbtn: Button? = null
+    private var pendingNext: Runnable? = null
+    private var paused = false
+    private var appMode = false      // 연결 앱/브라우저로 보낸 상태 (돌아오면 결과 확인)
+    private var leftForApp = false
+    private var loginHandled = false
+    private var tosBar: LinearLayout? = null
     private val handler = Handler(Looper.getMainLooper())
     private val timeoutMs = 30_000L
     private val timeoutCheck = Runnable {
@@ -59,12 +74,20 @@ class SiteActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val id = intent.getStringExtra("id") ?: ""
+        mode = intent.getStringExtra("mode") ?: "single"
+        queue = intent.getStringArrayListExtra("queue") ?: arrayListOf()
+        pos = intent.getIntExtra("pos", 0)
+        intent.getStringArrayListExtra("loginList")?.let { loginList.addAll(it) }
         recipe = Store.recipe(this, id) ?: run {
+            if (mode != "single") { goNextNow(); return }
             Toast.makeText(this, "이벤트를 찾을 수 없어요", Toast.LENGTH_SHORT).show(); finish(); return
         }
 
-        // 📱 연결 앱 또는 🌐 브라우저로 지정된 이벤트: 바로 열고 이 화면은 닫음 (결과는 알림에서)
-        if (recipe.optString("appPackage").isNotEmpty() || recipe.optBoolean("useBrowser", false)) {
+        // 📱 연결 앱 / 🌐 브라우저 / 공유로 저장한 앱 화면 주소(deepUrl)가 있는 이벤트
+        val external = recipe.optString("appPackage").isNotEmpty() || recipe.optBoolean("useBrowser", false) ||
+            recipe.optString("deepUrl").isNotEmpty() || recipe.optString("url").startsWith("package:")
+        if (external && mode == "login") { goNextNow(); return } // 로그인 몰아서 하기는 웹 이벤트만
+        if (external && mode == "single") {
             val ok = AppLauncher.open(this, recipe)
             Toast.makeText(this, if (ok) "열었어요 — 참여 후 알림의 버튼으로 결과를 남기세요" else "연결된 앱을 찾을 수 없어요. 이벤트 수정에서 연결을 해제해 주세요", Toast.LENGTH_LONG).show()
             finish(); return
@@ -97,15 +120,49 @@ class SiteActivity : Activity() {
                 setOnClickListener { onClick() }
             }, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         }
-        btn(row1, "✅ 성공") { record("SUCCESS") }
-        btn(row1, "🔁 이미 참여") { record("ALREADY_DONE") }
-        btn(row1, "⛔ 마감") { record("CLOSED") }
-        btn(row2, "⏭ 건너뜀") { record("USER_SKIPPED") }
-        btn(row2, "⚠ 실패") { if (lastErrorCode.isNotEmpty()) record(lastErrorCode) else askFailReason() }
-        btn(row2, "⋯ 더보기") { moreMenu() }
+        if (mode == "login") {
+            btn(row2, "✅ 로그인됨 → 다음") {
+                Store.updateRecipe(this, recipe.optString("id")) { it.put("loginOk", Store.today()); it.remove("needLogin") }
+                goNextNow()
+            }
+            btn(row2, "⏭ 다음") { goNextNow() }
+        } else {
+            btn(row1, "✅ 성공") { record("SUCCESS") }
+            btn(row1, "🔁 이미 참여") { record("ALREADY_DONE") }
+            btn(row1, "⛔ 마감") { record("CLOSED") }
+            btn(row2, "⏭ 건너뜀") { record("USER_SKIPPED") }
+            btn(row2, "⚠ 실패") { if (lastErrorCode.isNotEmpty()) record(lastErrorCode) else askFailReason() }
+            btn(row2, "⋯ 더보기") { moreMenu() }
+        }
 
         web = WebView(this)
+        web.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_YES // 삼성 패스·구글 비밀번호 관리자 자동완성 (앱은 비밀번호 저장 안 함)
         root.addView(title, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        if (mode != "single") {
+            val qrow = row()
+            val qtext = TextView(this).apply {
+                val label = if (mode == "login") "🔑 로그인" else "▶ 연속 응모"
+                text = "$label ${pos + 1}/${queue.size}" + (nextName()?.let { " · 다음: $it" } ?: " · 마지막")
+                textSize = 13f
+                setPadding((12 * dp).toInt(), 0, 0, 0)
+            }
+            qrow.addView(qtext, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            qbtn = Button(this).apply { text = "⏹ 그만"; textSize = 13f; isAllCaps = false; setOnClickListener { onQueueButton() } }
+            qrow.addView(qbtn, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
+            qrow.setBackgroundColor(Color.parseColor("#E8F5E9"))
+            root.addView(qrow, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        }
+        // ✅ 약관 한 번 탭: 미확인 사이트 상단 배너
+        if (!assist && !restricted && mode != "login" && !external) {
+            tosBar = row().apply {
+                setBackgroundColor(Color.parseColor("#E3F2FD"))
+                addView(Button(this@SiteActivity).apply { text = "📄 약관 열기"; textSize = 12f; isAllCaps = false; setOnClickListener { openTerms() } },
+                    LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+                addView(Button(this@SiteActivity).apply { text = "✅ 확인함 → 보조 켜기"; textSize = 12f; isAllCaps = false; setOnClickListener { confirmTos() } },
+                    LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+            }
+            root.addView(tosBar, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+        }
         root.addView(status, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         root.addView(web, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
         root.addView(row1, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
@@ -143,6 +200,15 @@ class SiteActivity : Activity() {
                 if (lastErrorCode == "TIMEOUT" || lastErrorCode == "NETWORK_ERROR") { lastErrorCode = ""; lastError = "" }
                 if (assist && (url.startsWith("http://") || url.startsWith("https://"))) {
                     view.evaluateJavascript(Engine.script(this@SiteActivity, recipe), null)
+                }
+                if (mode == "queue" && url.startsWith("http")) {
+                    view.evaluateJavascript("(function(){var p=document.querySelector('input[type=password]');return !!(p&&p.offsetParent)})()") { res ->
+                        if (res == "true") onLoginNeeded()
+                        else if (recipe.optBoolean("needLogin", false)) {
+                            Store.updateRecipe(this@SiteActivity, recipe.optString("id")) { it.remove("needLogin") }
+                            recipe.remove("needLogin")
+                        }
+                    }
                 }
             }
 
@@ -188,6 +254,12 @@ class SiteActivity : Activity() {
         }
         if (assist) web.addJavascriptInterface(EngineBridge(), "EHBridge")
         if (notes.isNotEmpty()) showStatus(notes.joinToString("\n"))
+
+        if (external) { // 연속 응모 중 앱 이벤트 차례
+            val ok = AppLauncher.open(this, recipe)
+            enterAppWait(if (ok) null else "⚠ 연결된 앱을 열지 못했어요. [⏭ 건너뜀]을 누르세요")
+            return
+        }
 
         val url = recipe.optString("url")
         if (url.startsWith("http://") || url.startsWith("https://")) {
@@ -241,7 +313,7 @@ class SiteActivity : Activity() {
                 val cur = web.url?.takeIf { it.startsWith("http") }
                 AppLauncher.open(this, fresh, cur)
                 Toast.makeText(this, "연결했어요. 앱 안 경로는 [이벤트 수정 → 경로 메모]에 적어 두면 알림에 나와요", Toast.LENGTH_LONG).show()
-                finish()
+                if (mode == "single") finish() else enterAppWait(null)
             }
             .setNegativeButton("취소", null).show()
     }
@@ -255,7 +327,7 @@ class SiteActivity : Activity() {
         Store.updateRecipe(this, recipe.optString("id")) { r -> r.put("useBrowser", true); r.remove("appOnly") }
         AppLauncher.open(this, recipe, url)
         Toast.makeText(this, "구글 로그인은 앱 안에서 막혀 있어(구글 정책) 브라우저로 열었어요. 다음부터 이 이벤트는 브라우저로 열려요", Toast.LENGTH_LONG).show()
-        finish()
+        if (mode == "single") finish() else enterAppWait(null)
     }
 
     /** 월별로 바뀌는 이벤트: 이번 달 페이지를 찾아 들어간 뒤 그 주소를 저장 */
@@ -301,7 +373,8 @@ class SiteActivity : Activity() {
         when (code) {
             "LOGIN_REQUIRED", "CAPTCHA" -> {
                 lastErrorCode = code
-                showStatus(if (code == "CAPTCHA") "🧩 캡차가 있어요. 직접 풀어 주세요" else "🔑 로그인이 필요해요. 직접 로그인해 주세요 (한 번 하면 유지)")
+                if (code == "LOGIN_REQUIRED" && mode == "queue") onLoginNeeded()
+                else showStatus(if (code == "CAPTCHA") "🧩 캡차가 있어요. 직접 풀어 주세요" else "🔑 로그인이 필요해요. 직접 로그인해 주세요 (한 번 하면 유지)")
             }
             else -> autoRecord(code, "[자동·$from] \"$word\" / $text")
         }
@@ -312,6 +385,7 @@ class SiteActivity : Activity() {
         Store.addLog(this, recipe.optString("id"), recipe.optString("name"), code, msg.take(300))
         val label = mapOf("SUCCESS" to "성공", "ALREADY_DONE" to "이미 참여", "CLOSED" to "마감", "FAILED" to "실패(오답 등)")[code] ?: code
         showStatus("📝 자동 판정: $label → 기록했어요. 다르면 아래 버튼으로 고쳐 주세요")
+        if (mode == "queue") scheduleNext(2000, "📝 자동 판정: $label")
     }
 
     /** 버튼 톡 지정: 다음 톡 한 번을 가로채 그 버튼을 기억 (누른 동작은 사이트로 안 감) */
@@ -362,7 +436,8 @@ class SiteActivity : Activity() {
                         else if (code == "LOGIN_REQUIRED" || code == "CAPTCHA") { lastErrorCode = code; showStatus("⚠ $msg") }
                     "status" -> {
                         if (code in setOf("LOGIN_REQUIRED", "CAPTCHA", "POPUP_BLOCKED", "SELECTOR_NOT_FOUND")) lastErrorCode = code
-                        showStatus((if (code == "READY") "👆 " else "⚠ ") + msg)
+                        if (code == "LOGIN_REQUIRED" && mode == "queue") onLoginNeeded()
+                        else showStatus((if (code == "READY") "👆 " else "⚠ ") + msg)
                     }
                     "info" -> if (code != "ENGINE_START") showStatus("🤖 $msg")
                     "picked" -> savePick(r.optString("mode"), r.optString("selector").take(300), r.optString("text").take(30))
@@ -384,18 +459,129 @@ class SiteActivity : Activity() {
         if (code == "CLOSED" && stale) {
             AlertDialog.Builder(this)
                 .setMessage("이 추천 주소는 지난 이벤트일 가능성이 커요.\n\n· 끄기: 오늘 목록에서 빼요\n· 이번 달 새 출석 페이지를 찾았다면 [⋯ 더보기 → 📌 주소 저장]을 쓰세요")
-                .setPositiveButton("끄기") { _, _ -> Store.updateRecipe(this, recipe.optString("id")) { it.put("enabled", false) }; finish() }
-                .setNegativeButton("그대로 두기") { _, _ -> finish() }
-                .setOnCancelListener { finish() }
+                .setPositiveButton("끄기") { _, _ -> Store.updateRecipe(this, recipe.optString("id")) { it.put("enabled", false) }; afterResult() }
+                .setNegativeButton("그대로 두기") { _, _ -> afterResult() }
+                .setOnCancelListener { afterResult() }
                 .show()
             return
         }
+        afterResult()
+    }
+
+    /* ---------- ▶ 연속 응모 진행 ---------- */
+    private fun nextName(): String? =
+        queue.getOrNull(pos + 1)?.let { Store.recipe(this, it)?.optString("name") }
+
+    /** 결과가 정해진 뒤: 하나만 모드면 닫고, 연속 모드면 2초 뒤 다음 */
+    private fun afterResult() {
+        if (mode == "single") { finish(); return }
+        scheduleNext(2000, "기록했어요")
+    }
+
+    private fun scheduleNext(ms: Long, why: String) {
+        cancelNext()
+        paused = false
+        val nm = nextName()
+        showStatus("$why — ${ms / 1000}초 뒤 " + (nm?.let { "다음: $it" } ?: "끝") + "  (멈추려면 위 [⏸ 멈춤])")
+        qbtn?.text = "⏸ 멈춤"
+        pendingNext = Runnable { goNextNow() }.also { handler.postDelayed(it, ms) }
+    }
+
+    private fun cancelNext() { pendingNext?.let { handler.removeCallbacks(it) }; pendingNext = null }
+
+    private fun onQueueButton() {
+        when {
+            pendingNext != null -> { cancelNext(); paused = true; qbtn?.text = "▶ 다음"; showStatus("⏸ 멈췄어요. 준비되면 [▶ 다음]") }
+            paused -> goNextNow()
+            else -> finishQueue()
+        }
+    }
+
+    fun goNextNow() {
+        cancelNext()
+        val n = pos + 1
+        if (n >= queue.size) { finishQueue(); return }
+        startActivity(Intent(this, SiteActivity::class.java)
+            .putExtra("id", queue[n]).putExtra("mode", mode).putExtra("pos", n)
+            .putStringArrayListExtra("queue", queue).putStringArrayListExtra("loginList", loginList))
+        @Suppress("DEPRECATION") overridePendingTransition(0, 0)
         finish()
+    }
+
+    private fun finishQueue() {
+        cancelNext()
+        MainActivity.pendingSummary = JSONObject().put("mode", mode).put("ids", JSONArray(queue))
+            .put("loginList", JSONArray(loginList)).put("stoppedAt", pos).toString()
+        finish()
+    }
+
+    /** 로그인 화면이면: 지금 로그인(멈춤) 또는 5초 뒤 다음 → 끝에 '로그인 필요' 목록으로 */
+    private fun onLoginNeeded() {
+        if (loginHandled) return
+        loginHandled = true
+        val id = recipe.optString("id")
+        if (id !in loginList) loginList.add(id)
+        Store.updateRecipe(this, id) { it.put("needLogin", true) }
+        recipe.put("needLogin", true)
+        scheduleNext(5000, "🔑 로그인이 필요해요. 지금 하려면 [⏸ 멈춤] 후 로그인(비밀번호 자동완성), 아니면 나중에 몰아서")
+    }
+
+    /** 연결 앱/브라우저로 보낸 뒤 대기: 알림에서 기록했거나 돌아와서 결과를 누르면 다음 */
+    private fun enterAppWait(err: String?) {
+        appMode = true
+        web.visibility = View.GONE
+        tosBar?.visibility = View.GONE
+        showStatus(err ?: "📱 앱/브라우저로 열었어요. 참여한 뒤 알림 버튼으로 기록하거나, 돌아와서 아래 결과를 눌러 주세요")
+    }
+
+    /* ---------- ✅ 약관 한 번 탭 ---------- */
+    private fun openTerms() {
+        web.evaluateJavascript("(function(){var a=[].slice.call(document.querySelectorAll('a[href]')).filter(function(x){return /이용\\s*약관|약관/.test(x.innerText||'')});return a.length?a[0].href:''})()") { res ->
+            val href = try { JSONArray("[$res]").optString(0) } catch (e: Exception) { "" }
+            if (href.startsWith("http")) { cancelNext(); web.loadUrl(href); showStatus("📄 약관을 열었어요. 다 읽으면 [✅ 확인함 → 보조 켜기] 또는 뒤로가기") }
+            else showStatus("📄 이 화면에서 '이용약관' 링크를 못 찾았어요. 보통 사이트 맨 아래에 있어요")
+        }
+    }
+
+    private fun confirmTos() {
+        AlertDialog.Builder(this)
+            .setMessage("이 사이트 이용약관·이벤트 유의사항에 '매크로·자동화 프로그램 금지' 조항이 없음을 확인하셨나요?\n\n켜면: 팝업 닫기·입력·버튼 강조·결과 자동 판정 (누르는 건 여전히 직접)")
+            .setPositiveButton("확인함 · 켜기") { _, _ ->
+                Store.updateRecipe(this, recipe.optString("id")) { it.put("tosChecked", true) }
+                recipe.put("tosChecked", true)
+                assist = true
+                web.addJavascriptInterface(EngineBridge(), "EHBridge")
+                tosBar?.visibility = View.GONE
+                showStatus("🤖 자동 보조를 켰어요 — 다시 불러옵니다")
+                web.reload()
+            }
+            .setNegativeButton("취소", null).show()
     }
 
     override fun onPause() {
         super.onPause()
         CookieManager.getInstance().flush() // 로그인 유지
+        if (appMode) leftForApp = true
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!appMode || !leftForApp) return
+        leftForApp = false
+        if (Store.doneToday(this, recipe.optString("id")) || lastLogIsToday()) {
+            if (mode == "queue") scheduleNext(1500, "🔔 알림에서 기록됐어요") else finish()
+        } else showStatus("돌아오셨네요 — 결과를 아래 버튼으로 눌러 주세요")
+    }
+
+    /** 오늘 이 이벤트 기록이 있는가 (실패 포함 — 알림의 [실패]도 다음으로 넘어가게) */
+    private fun lastLogIsToday(): Boolean {
+        val logs = Store.logs(this); val t = Store.today(); val id = recipe.optString("id")
+        for (i in logs.length() - 1 downTo 0) {
+            val l = logs.optJSONObject(i) ?: continue
+            if (l.optString("date") != t) break
+            if (l.optString("recipeId") == id && l.optString("message").startsWith("[알림에서 기록]")) return true
+        }
+        return false
     }
 
     @Deprecated("Deprecated in Java")
@@ -405,6 +591,7 @@ class SiteActivity : Activity() {
 
     override fun onDestroy() {
         handler.removeCallbacks(timeoutCheck)
+        cancelNext()
         if (::web.isInitialized) web.destroy()
         super.onDestroy()
     }

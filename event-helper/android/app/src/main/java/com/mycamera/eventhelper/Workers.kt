@@ -15,7 +15,7 @@ class MorningWorker(ctx: Context, params: WorkerParameters) : Worker(ctx, params
                     val ot = r.optString("openTime", "")
                     if (ot.isEmpty()) r.optString("name") else "${r.optString("name")}($ot)"
                 }
-            Notifier.notify(ctx, 1, "오늘 응모할 이벤트 ${list.size}건", names)
+            Notifier.notify(ctx, 1, "오늘 응모할 이벤트 ${list.size}건 — 누르면 ▶ 연속 응모 시작", names, action = "queue")
         }
         Scheduler.scheduleMorning(ctx, fromWorker = true)
         Scheduler.scheduleOpenTimes(ctx)

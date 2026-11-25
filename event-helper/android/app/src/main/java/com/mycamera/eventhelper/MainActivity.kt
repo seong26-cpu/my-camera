@@ -37,8 +37,14 @@ class MainActivity : Activity() {
                 try { startActivity(Intent(Intent.ACTION_VIEW, request.url)) } catch (_: Exception) {}
                 return true
             }
+
+            override fun onPageFinished(view: WebView, url: String) {
+                pageReady = true
+                runPendingAction()
+            }
         }
         web.loadUrl("file:///android_asset/ui/index.html")
+        pendingAction = intent?.getStringExtra("action")
 
         Notifier.ensureChannel(this)
         if (Build.VERSION.SDK_INT >= 33 && !Notifier.canNotify(this)) {
@@ -60,8 +66,26 @@ class MainActivity : Activity() {
         web.evaluateJavascript("window.onBackupPicked && onBackupPicked(" + JSONObject.quote(text) + ")", null)
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pendingAction = intent.getStringExtra("action")
+        if (pageReady) runPendingAction()
+    }
+
+    private var pageReady = false
+    private var pendingAction: String? = null
+    private fun runPendingAction() {
+        if (pendingAction == "queue") web.evaluateJavascript("window.startQueueFromApp && startQueueFromApp()", null)
+        pendingAction = null
+    }
+
     override fun onResume() {
         super.onResume()
+        pendingSummary?.let { sum ->
+            pendingSummary = null
+            if (pageReady) web.evaluateJavascript("window.onQueueDone && onQueueDone($sum)", null)
+        }
         if (::web.isInitialized) web.evaluateJavascript("window.onAppResume && onAppResume()", null)
     }
 
@@ -72,7 +96,11 @@ class MainActivity : Activity() {
         }
     }
 
-    companion object { const val PICK_BACKUP = 42 }
+    companion object {
+        const val PICK_BACKUP = 42
+        /** 연속 응모가 끝나면 SiteActivity 가 남기는 요약 → 돌아왔을 때 화면에 표시 */
+        @Volatile var pendingSummary: String? = null
+    }
 
     /** HTML 화면 ↔ 안드로이드 연결 (window.Android.xxx) */
     inner class Bridge {
@@ -140,6 +168,17 @@ class MainActivity : Activity() {
         @JavascriptInterface fun appVersion(): String =
             packageManager.getPackageInfo(packageName, 0).versionName ?: ""
         @JavascriptInterface fun notifyAllowed(): Boolean = Notifier.canNotify(ctx)
+
+        /** ▶ 연속 응모 / 🔑 로그인 몰아서 하기 시작 (ids: 순서대로 정렬된 이벤트 id 배열) */
+        @JavascriptInterface fun startQueue(idsJson: String, mode: String): Boolean {
+            val arr = try { org.json.JSONArray(idsJson) } catch (e: Exception) { return false }
+            val ids = ArrayList<String>()
+            for (i in 0 until arr.length()) ids.add(arr.optString(i))
+            if (ids.isEmpty()) return false
+            startActivity(Intent(ctx, SiteActivity::class.java).putExtra("id", ids[0]).putExtra("pos", 0)
+                .putExtra("mode", if (mode == "login") "login" else "queue").putStringArrayListExtra("queue", ids))
+            return true
+        }
 
         @JavascriptInterface fun openSite(id: String) {
             startActivity(Intent(ctx, SiteActivity::class.java).putExtra("id", id))

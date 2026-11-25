@@ -32,8 +32,9 @@ object AppLauncher {
 
     /** 레시피 설정대로 열기: 연결 앱 → 그 앱(이벤트 주소를 그 앱이 열 수 있으면 이벤트 화면으로), 아니면 기본 브라우저 */
     fun open(ctx: Context, r: JSONObject, urlOverride: String? = null): Boolean {
-        val url = urlOverride ?: r.optString("url")
-        val pkg = r.optString("appPackage")
+        // 공유로 저장한 앱 화면 주소(deepUrl)가 있으면 그걸 우선 (앱이 지원하면 이벤트 화면으로 직행)
+        val url = urlOverride ?: r.optString("deepUrl").ifEmpty { r.optString("url") }
+        val pkg = r.optString("appPackage").ifEmpty { if (url.startsWith("package:")) url.removePrefix("package:") else "" }
         val ok = if (pkg.isNotEmpty()) openApp(ctx, pkg, url) else openBrowser(ctx, url)
         if (ok) recordPrompt(ctx, r)
         return ok

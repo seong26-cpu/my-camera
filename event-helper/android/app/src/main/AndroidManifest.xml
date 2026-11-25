@@ -41,6 +41,20 @@
 
         <receiver android:name=".RecordReceiver" android:exported="false" />
 
+        <!-- 다른 앱에서 [공유] → 응모 도우미: 앱 이벤트 화면 주소 저장 -->
+        <activity
+            android:name=".ShareActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:label="응모 도우미에 이벤트 주소 저장"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
         <activity
             android:name=".SiteActivity"
             android:exported="false"

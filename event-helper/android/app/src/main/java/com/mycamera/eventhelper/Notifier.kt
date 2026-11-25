@@ -33,10 +33,11 @@ object Notifier {
         return NotificationManagerCompat.from(ctx).areNotificationsEnabled()
     }
 
-    fun notify(ctx: Context, id: Int, title: String, text: String) {
+    fun notify(ctx: Context, id: Int, title: String, text: String, action: String? = null) {
         ensureChannel(ctx)
         if (!canNotify(ctx)) return
         val open = Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        if (action != null) open.putExtra("action", action) // 예: "queue" → 누르면 ▶ 연속 응모 바로 시작
         val pi = PendingIntent.getActivity(ctx, id, open, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val n = NotificationCompat.Builder(ctx, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat)

@@ -16,6 +16,7 @@ const A = window.Android || (() => {
     today, appVersion: () => 'browser-preview', notifyAllowed: () => false,
     mailTest: () => setTimeout(() => window.onMailTest({ ok: false, error: '(미리보기) 폰 앱에서만 발송돼요' }), 300),
     mailStatus: () => '{}', sendSummaryNow: () => false,
+    startQueue: (ids, mode) => { window.__queue = { ids: JSON.parse(ids), mode }; toast(`(미리보기) ${mode === 'login' ? '로그인 몰아서' : '연속 응모'} ${JSON.parse(ids).length}건`); return true; },
     shareFile: (name, mime, content) => { window.__shared = { name, mime, content }; return true; },
     pickBackup: () => {}, replaceLogs: (j) => s('logs', j),
     getProfile: () => g('profile', '{}'), saveProfile: (j) => s('profile', j), clearProfile: () => s('profile', '{}'),
@@ -104,6 +105,45 @@ function codeBadge(code) {
 }
 
 /* ---------- 오늘 ---------- */
+const isExternal = (r) => !!(r.appPackage || r.useBrowser || r.deepUrl || /^package:/.test(r.url || ''));
+/** ▶ 연속 응모 순서: ① 로그인된 웹 ② 선착순(오픈 시각 순) ③ 앱/브라우저 ④ 로그인 필요 — 오늘 아직 안 한 것만 */
+function sortQueue(list, logsArr, today) {
+  const doneToday = (id) => logsArr.some((l) => l.date === today && l.recipeId === id && DONE.has(l.code));
+  const rank = (r) => (r.needLogin ? 3 : isExternal(r) ? 2 : r.openTime ? 1 : 0);
+  return list.filter((r) => activeToday(r, today) && !doneToday(r.id))
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => rank(a.r) - rank(b.r) || (rank(a.r) === 1 ? (a.r.openTime || '').localeCompare(b.r.openTime || '') : 0) || a.i - b.i)
+    .map((x) => x.r.id);
+}
+/** 🔑 로그인 몰아서 하기 대상: 켜진 웹 이벤트 중 로그인 필요 표시가 있거나 아직 로그인 확인 안 한 곳 (🔒 제한·앱 이벤트 제외) */
+function loginTargets(list) {
+  return list.filter((r) => r.enabled !== false && !isExternal(r) && /^https?:/.test(r.url) && (r.needLogin || !r.loginOk))
+    .sort((a, b) => (b.needLogin ? 1 : 0) - (a.needLogin ? 1 : 0)).map((r) => r.id);
+}
+function startQueue() {
+  const ids = sortQueue(recipes, logs, A.today());
+  if (!ids.length) { toast('오늘 남은 응모가 없어요 🎉'); return; }
+  A.startQueue(JSON.stringify(ids), 'queue');
+}
+window.startQueueFromApp = () => { load(); startQueue(); };
+let queueSummary = null;
+window.onQueueDone = (sum) => { queueSummary = sum; renderAll(); window.scrollTo(0, 0); };
+function summaryCard() {
+  if (!queueSummary) return '';
+  const t = A.today();
+  const ids = queueSummary.ids || [];
+  const res = ids.map((id) => ({ r: recipes.find((x) => x.id === id), l: todayResult(id, t) })).filter((x) => x.r);
+  const ok = res.filter((x) => x.l && DONE.has(x.l.code)).length;
+  const fail = res.filter((x) => x.l && !DONE.has(x.l.code)).length;
+  const login = (queueSummary.loginList || []).map((id) => recipes.find((x) => x.id === id)).filter(Boolean);
+  const title = queueSummary.mode === 'login' ? '🔑 로그인 몰아서 하기 끝' : '▶ 연속 응모 끝';
+  return `<div class="card" style="border-color:var(--green)"><div class="name">${title}</div>
+    <div class="meta">완료 ${ok} · 실패 ${fail} · 남음 ${res.length - ok - fail}</div>
+    ${login.length ? `<div class="meta">🔑 로그인 필요: ${login.map((r) => esc(r.name)).join(', ')}</div>
+      <button class="ghost wide" id="loginRound">🔑 이 ${login.length}곳 로그인 몰아서 하기</button>` : ''}
+    <button class="ghost wide" id="closeSummary">닫기</button></div>`;
+}
+
 function renderToday() {
   const t = A.today();
   const list = recipes.filter((r) => activeToday(r, t))
@@ -115,7 +155,13 @@ function renderToday() {
     el.innerHTML = `<div class="empty">오늘 응모할 이벤트가 없어요.<br>아래 <b>🗂 이벤트</b> 탭에서 추가하세요.</div>`;
     return;
   }
-  el.innerHTML = `<p class="help">[응모하기]를 누르면 사이트가 열립니다. 마지막 <b>제출·캡차·약관 동의는 직접</b> 눌러 주세요.</p>` +
+  const left = sortQueue(recipes, logs, t).length;
+  const needLogin = loginTargets(recipes).length;
+  el.innerHTML = summaryCard() + (left ? `<button class="primary wide" id="startQueue" style="font-size:18px;padding:16px">▶ 오늘 ${left}건 연속 응모</button>
+    <p class="help">한 번 누르면 차례대로 열려요. 강조된 버튼만 누르면 결과를 자동 판정해 <b>2초 뒤 다음 사이트</b>로 넘어갑니다.
+    로그인 화면이 나오면 건너뛰고 끝에 모아서 알려 드려요. (제출·캡차·약관 동의는 직접)</p>` : `<p class="help">🎉 오늘 응모를 모두 마쳤어요.</p>`) +
+    (needLogin ? `<button class="ghost wide" id="loginRound">🔑 로그인 몰아서 하기 (${needLogin}곳 · 처음 한 번)</button>
+    <p class="help">켜진 사이트를 연달아 열어요. 로그인 칸에서 <b>삼성 패스·구글 비밀번호 자동완성</b>을 쓰면 빨라요. 한 번 로그인하면 유지돼요.</p>` : '') +
     list.map((r) => {
       const l = todayResult(r.id, t);
       const done = l && DONE.has(l.code);
@@ -152,7 +198,8 @@ function renderManage() {
       <div class="row">
         <div class="grow">
           <div class="name">${esc(r.name)}</div>
-          <div class="meta">${r.cat ? `<span class="badge">${esc(r.cat)}</span>` : ''}${groupBadge(r)}<span class="badge">${esc(TYPES[r.type] || r.type)}</span>${openBadge(r)}${assistBadge(r)}${r.start || r.end ? `${esc(r.start || '…')} ~ ${esc(r.end || '…')}` : ''}</div>
+          ${r.autoOff && r.enabled === false ? `<div class="meta"><span class="badge bad">🧹 자동 꺼짐 · ${esc(r.autoOff.reason || '')} (${esc(r.autoOff.date || '')})</span></div>` : ''}
+          <div class="meta">${r.cat ? `<span class="badge">${esc(r.cat)}</span>` : ''}${groupBadge(r)}${r.needLogin ? '<span class="badge warn">🔑 로그인 필요</span>' : ''}<span class="badge">${esc(TYPES[r.type] || r.type)}</span>${openBadge(r)}${assistBadge(r)}${r.start || r.end ? `${esc(r.start || '…')} ~ ${esc(r.end || '…')}` : ''}</div>
           ${(r.flags || []).map((f) => `<div class="meta">· ${esc(f)}</div>`).join('')}
         </div>
         <div>
@@ -191,7 +238,8 @@ function renderEditor(el) {
       : `<p class="help">🎯 버튼을 못 찾으면: 응모 화면 아래 <b>[🎯 버튼 지정]</b> → 사이트의 버튼을 톡 하면 기억해요 (약관 확인 사이트만).</p>`}
     <h2>📱 여는 방식</h2>
     <p class="help">${r.appPackage ? `<b>📱 ${esc(r.appLabel || r.appPackage)}</b> 앱으로 바로 열어요.` : r.useBrowser ? '<b>🌐 기본 브라우저</b>로 바로 열어요 (구글 로그인 사이트 등).' : '앱 안 브라우저로 열어요 (로그인 유지 · 자동 보조 가능).'}
-    ${r.appPackage || r.useBrowser ? '<button class="ghost" id="unlinkApp" style="padding:4px 10px;font-size:13px">앱 안 브라우저로 되돌리기</button>' : '앱 전용 이벤트면 응모 화면 [⋯ 더보기 → 📱 앱으로 열기]에서 앱을 고르세요.'}</p>
+    ${r.appPackage || r.useBrowser || r.deepUrl ? '<button class="ghost" id="unlinkApp" style="padding:4px 10px;font-size:13px">앱 안 브라우저로 되돌리기</button>' : '앱 전용 이벤트면 응모 화면 [⋯ 더보기 → 📱 앱으로 열기]에서 앱을 고르세요.'}</p>
+    <p class="help">${r.deepUrl ? `🔗 <b>앱 화면 주소 저장됨</b> (공유로 가져옴) — 앱이 지원하면 이벤트 화면으로 바로 열려요.` : `🔗 <b>앱 메인만 열리면</b>: 쇼핑몰 앱에서 이벤트 화면 → <b>[공유] → 응모 도우미</b> → 이 이벤트 선택. 그 화면 주소로 바로 열어요 (앱마다 지원 여부 다름).`}</p>
     <label>앱 안 경로 메모 <small>(앱으로 열 때 알림에 표시 · 예: 마이 → 출석체크)</small></label>
     <input type="text" id="f-path" value="${esc(r.appPath || '')}" placeholder="예: 혜택 탭 → 출석체크">
     <label>메모</label><input type="text" id="f-note" value="${esc(r.note || '')}">
@@ -346,11 +394,18 @@ document.addEventListener('click', (e) => {
   if (b.dataset.edit) { editingId = b.dataset.edit; renderManage(); window.scrollTo(0, 0); return; }
   if (b.dataset.toggle) {
     const r = recipes.find((x) => x.id === b.dataset.toggle);
-    if (r) { r.enabled = r.enabled === false; saveRecipes(); toast(r.enabled ? `켰어요 — 오늘 목록에 나와요` : '껐어요'); renderAll(); }
+    if (r) { r.enabled = r.enabled === false; if (r.enabled) delete r.autoOff; saveRecipes(); toast(r.enabled ? `켰어요 — 오늘 목록에 나와요` : '껐어요'); renderAll(); }
     return;
   }
   switch (b.id) {
     case 'addBtn': editingId = ''; renderManage(); break;
+    case 'startQueue': startQueue(); break;
+    case 'loginRound': {
+      const ids = queueSummary && queueSummary.loginList && queueSummary.loginList.length ? queueSummary.loginList : loginTargets(recipes);
+      if (!ids.length) { toast('로그인할 사이트가 없어요'); break; }
+      queueSummary = null; A.startQueue(JSON.stringify(ids), 'login'); break;
+    }
+    case 'closeSummary': queueSummary = null; renderToday(); break;
     case 'presetBtn': { const n = importPresets(); toast(`${n}곳 추가 (꺼진 상태). 원하는 곳만 [켜기] 하세요`); renderAll(); break; }
     case 'cancelBtn': editingId = null; renderManage(); break;
     case 'saveBtn': saveEditor(); break;
@@ -401,7 +456,7 @@ document.addEventListener('click', (e) => {
       break;
     case 'unlinkApp': {
       const r = recipes.find((x) => x.id === editingId);
-      if (r) { delete r.appPackage; delete r.appLabel; delete r.useBrowser; delete r.appOnly; saveRecipes(); toast('앱 안 브라우저로 되돌렸어요'); renderManage(); }
+      if (r) { delete r.appPackage; delete r.appLabel; delete r.useBrowser; delete r.appOnly; delete r.deepUrl; saveRecipes(); toast('앱 안 브라우저로 되돌렸어요'); renderManage(); }
       break;
     }
     case 'clearPick': {
